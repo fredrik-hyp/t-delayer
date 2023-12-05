@@ -3,7 +3,7 @@
 #cp database_* /tmp
 #cp populate_delayer.oh.sql /tmp
 
-su - postgres -c "/usr/bin/dropdb delayerdb"
+#su - postgres -c "/usr/bin/dropdb delayerdb"
 su - postgres -c "/usr/bin/createdb delayerdb"
 su - postgres -c "/usr/bin/psql delayerdb < /tmp/database_1_0.sql"
 su - postgres -c "/usr/bin/psql delayerdb < /tmp/database_1_0-2_0.sql"

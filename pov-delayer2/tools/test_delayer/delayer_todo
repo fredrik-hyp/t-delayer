@@ -1,0 +1,23 @@
+Att få now() i unix timestamp
+kan förvisso använda postgres funktionerna för det?
+date +%s
+
+
+Vi hanterar det så här:
+
+1) SIGUSR1 skickas till delayern
+2) Delayern läser in action column från delayercoms tabell, action = ”jump"
+2.1) Delayern läser ut tid att hoppa till, t
+2.1.1) Om startplayat är NULL pausa, play skickas enligt 3 nedan
+2.1 2) Om startplayat är satt, vänta till starttid och starta uppspelning.
+2.1.3) Om playto inte är NULL eller satt innan startplayat spela upp
+i all framtid, annars pausa när man kommer till playto-tid
+2.1.3_a) Om playto är satt innan startplayat spela upp i all framtid
+2.1.3_b) annars pausa när man kommer till playto-tid
+3) Om action är satt till pause eller play så ska uppspelningen
+pausas eller fortsätta, inget hopp ska göras i detta fall utan spela
+från currpos
+
+4) Varje sekund ska delayerstats tabellen uppdateras
+5) Kommer action playto läses playto columnen in på nytt från
+delayarcoms och uppdateras

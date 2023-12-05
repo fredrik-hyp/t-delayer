@@ -1,0 +1,33 @@
+insert into streaminterfaces (interfacetype, name, usertext) \
+	values \
+	('streamtransporter', 'st1', 'unused');
+
+insert into streaminterfaceconfigs \
+	(streaminterface_id, typeofconfig, autostart, msbuffer, resendmode, mode) \
+       values \
+	('1', 'stored', 'f', 400, 'normal' ,'transmitter');
+
+insert into streaminterfacesources \
+	(streaminterfaceconfig_id, name, sourcetype, host, port, talkbackhost, talkbackport) \
+	values \
+	('1', 'sourcename', 'udp', '224.1.1.11', 10000, '', 0);
+
+insert into streaminterfacesinks \
+	(streaminterfaceconfig_id, name, sinktype, host, port, talkbackhost, talkbackport) \
+	values \
+	('1','sinkname', 'rudp', '192.168.1.57', 2039, '127.0.0.1', 3434);
+
+
+#insert into delayercoms \
+	#(streaminterface_id, action, jumptos, startplayat, playto, timestamp, pathnumber) \
+	#values \
+	#('1', 'pause', '', '', '');
+
+
+#insert into delayerconfigs \
+	#(streaminterface_id, pathnumber, playondelete) \
+	#values \
+	#('1', '1', 't');
+
+
+

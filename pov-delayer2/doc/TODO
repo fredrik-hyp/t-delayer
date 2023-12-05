@@ -1,0 +1,37 @@
+TODO
+====
+*rtp support
+*mpeg-ts statistics 
+*rate control resend packets
+*receiver side sets bufffer size
+*genereate sessionid and check packets for it
+*copy stored config to running config berfore starting stream
+*dont display to old statistics, set data older than 1 seconds is obsolete
+*integrate gui with tcp streams
+*fix licensing issues
+
+**Handle packet fragmentation, today assumes MTU of 1500
+**reread configuration without stopping interface
+**encryption
+**fix clock sync
+
+***Synchronize two or more machines to have seamless redundancy, should be done per interface.
+***IP-spoofing of sender, makes sense for multicast receiver and network???
+
+DONE
+====
+2013-05-04 - so reuse address flag on udp socket
+2013-05-10 - Determine distance to receiver and set resend timer to appropiate value
+2013-05-11 - make udp output have its own realtime thread
+2013-05-14 - fix 10Mbit limit
+2013-05-15 - read configuration from database
+2013-05-17 - implement protocol header
+2013-05-17 - heartbeat over link to detect receiver/transmitter down
+2013-05-17 - make states 
+2013-05-17 - setup and close procedure for link
+2013-05-19 - Deamonize
+2013-05-19 - start / stop / restart command
+2013-05-23 - add gui
+2013-05-23 - write log
+2013-05-24 - bitrate information
+2014-05-24 - Write statistics to  postgres

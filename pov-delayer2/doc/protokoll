@@ -1,0 +1,39 @@
+mc                                                             mc
+|                                                               |
+Transmitter-----------------------rudp------------------------Receiver
+main                                                          main
+ pre_setup_talkback_input                                      pre_setup_talkback_output
+  1. CTX                                                        1. CTX
+ pre_setup_rudp_output                                         pre_setup_rudp_input 
+  1. CTX                                                        1. CTX
+
+ while (NO_SHUT)                                               while (NO_SHUT)
+  setup_talkback_input                                          setup_talkback_output
+   1. setup socket                                               1. setup socket
+   2. bind                                                       2. bind
+   3. DTLSv1_listen                                              3. connect
+   4. setup socket
+   5. bind
+   6. connect
+   7. SSL_accept                                                 4. SSL_connect
+
+  setup_rudp_output                                             setup_rudp_input
+   1. setup socket                                               1. setup socket
+   2. connect                                                    2. bind
+                                                                 3. listen
+   3. ssl_connect                                                4. SSL_accept
+
+  doTransmitterHandshake(rudp_output, talkback_input)           doRecieverHandshake(rudp_input, talkback_output)
+   1. send_to_connection(rudp_output, "hello")                   1. recv_from_connection(rudp_input) => "hello"
+   2. "verifyhello" <= recv_from_connection(talkback_input)      2. send_to_connection(talkback_output, "verifyhello")
+   3. send_to_connection(rudp_output, "helloagain")              3. recv_from_connection(rudp_input) => "Hello again"
+   4. "welcome" <= recv_from_connection(talkback_input)          4. send_to_connection(talkback_output, "welcome")
+
+  while (STREAMING)                                             while (STREAMING)
+                                                                 1. ev. send_to_connection(talkback_output, HEARTBEAT)
+   1. Send_data_from_first_buffer(rudp_output, mcdata)           2. recv_from_connection(rudp_input) => mcdata | HEARTBEAT
+      upp till 13107 bytes (100mbps)
+   2. DATAACK|HEARTBEAT <= recv_from_connection(talkback_input)  3. send_to_connection(talkback_output, DATAACK)
+   3. clear_and_resend_buffer(rudp_output, mcdata)
+      upp till 13107 bytes (100mbps)
+   4. ev. send(rudp_output, HEARTBEAT)

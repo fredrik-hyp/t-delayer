@@ -1,0 +1,25 @@
+#!/usr/bin/php
+<?php
+    /* Cleans the database of old log and streamstat data */
+    require_once("/var/db/dblib.php");
+    require_once("/var/db/dbstreaminterfaces.php");
+    require_once("/var/db/dbstreaminterfacelogs.php");
+    
+    $dbconn = DBConnect();
+    
+    // Keep the 100 last log lines for each interface
+    $streaminterfaces = DBFetchAllStreaminterfaces();
+    foreach($streaminterfaces as $streaminterface){
+        $logs = DBFetchStreaminterfacelogsByStreaminterfaceId($streaminterface['id'], "DESC");
+        foreach($logs as $idx => $log){
+            if($idx > 199){
+                DBDelete("streaminterfacelogs", "timestamp < '" . $log['timestamp'] ."' AND streaminterface_id=" . $streaminterface['id']);
+                break;
+            }   
+        }
+    }
+    
+    // Delete stats older than 25 hours
+    DBDelete("streamstats", "timestamp < now() - interval '25 hour'");
+    
+?>

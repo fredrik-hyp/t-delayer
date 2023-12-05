@@ -1,0 +1,11 @@
+[Unit]
+Description=Delay a stream
+
+[Service]
+Type=forking
+Environment="INTERFACE_ID=%I"
+ExecStart=/usr/local/bin/delayer $INTERFACE_ID
+ExecStop=kill `cat /var/run/delayerd/udp_delayer_$INTERFACE_ID.pid`
+
+[Install]
+WantedBy=multi-user.target

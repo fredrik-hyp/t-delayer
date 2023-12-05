@@ -83,7 +83,7 @@ echo "sed -i  '/^local   all             all                                    
 echo "sed -i  '/^host    all             all             ::1\/128                 scram-sha-256/ s/scram-sha-256/trust/' /etc/postgresql/14/main/pg_hba.conf" >> DEBIAN/postinst
 
 echo 'service postgresql restart' >> DEBIAN/postinst
-echo 'sh /tmp/install_db.sh'>> DEBIAN/postinst
+echo 'sh /tmp/install_db.sh > /tmp/db_install_log.txt'>> DEBIAN/postinst
 echo 'rm /tmp/install_db.sh' >> DEBIAN/postinst
 echo 'rm /tmp/database*' >> DEBIAN/postinst
 ####### TO BE REMOVED ##############

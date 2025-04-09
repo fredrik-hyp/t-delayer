@@ -17,7 +17,7 @@ echo 'Package: delayer' > DEBIAN/control
 echo 'Version: 4.0.0' >> DEBIAN/control
 echo 'Section: base' >> DEBIAN/control
 echo 'Priority: optional' >> DEBIAN/control
-echo 'Architecture: amd64' >> DEBIAN/control
+echo 'Architecture: arm64' >> DEBIAN/control
 echo 'Depends: libpq5, postgresql-14' >> DEBIAN/control
 echo 'Maintainer: Christoffer Branzell<christoffer@polylegio.se>' >> DEBIAN/control
 echo 'Description: Polylegio Delayerd' >> DEBIAN/control
@@ -79,6 +79,7 @@ echo 'adduser --disabled-password  --quiet --system \
 # - OBS hardcorded path!! ---
 echo "sed -i  '/^local   all             postgres                                peer/ s/peer/trust/' /etc/postgresql/14/main/pg_hba.conf" >> DEBIAN/postinst
 echo "sed -i  '/^host    all             all             127\.0\.0.1\/32            md5/ s/md5/trust/' /etc/postgresql/14/main/pg_hba.conf" >> DEBIAN/postinst
+echo "sed -i  '/^host    all             all             127\.0\.0.1\/32            scram-sha-256/ s/scram-sha-256/trust/' /etc/postgresql/14/main/pg_hba.conf" >> DEBIAN/postinst
 echo "sed -i  '/^local   all             all                                     peer/ s/peer/trust/' /etc/postgresql/14/main/pg_hba.conf" >> DEBIAN/postinst
 echo "sed -i  '/^host    all             all             ::1\/128                 scram-sha-256/ s/scram-sha-256/trust/' /etc/postgresql/14/main/pg_hba.conf" >> DEBIAN/postinst
 
@@ -100,19 +101,19 @@ echo 'systemctl daemon-reload' >> DEBIAN/postinst
 chmod 755 DEBIAN/postinst
 
 # --- postrm ---
-echo '#!/bin/sh'              > DEBIAN/postrm
-echo '' >> DEBIAN/postrm
-echo 'set -e' >> DEBIAN/postrm
-echo '' >> DEBIAN/postrm
+# echo '#!/bin/sh'              > DEBIAN/postrm
+# echo '' >> DEBIAN/postrm
+# echo 'set -e' >> DEBIAN/postrm
+# echo '' >> DEBIAN/postrm
 # REMOVE START SCRIPT: Start script seems to be deleted by the apt-get remove-magic.
-#echo '/usr/bin/rm /etc/systemd/system/delayerd@.service' >> DEBIAN/postrm
-echo 'su - postgres -c "/usr/bin/pg_dump delayerdb > /tmp/backup_delayer_db.sql"' >> DEBIAN/postrm
-echo 'su - postgres -c "/usr/bin/dropdb delayerdb"' >> DEBIAN/postrm
+# echo '/usr/bin/rm /etc/systemd/system/delayerd@.service' >> DEBIAN/postrm
+# echo 'su - postgres -c "/usr/bin/pg_dump delayerdb > /tmp/backup_delayer_db.sql"' >> DEBIAN/postrm
+# echo 'su - postgres -c "/usr/bin/dropdb delayerdb"' >> DEBIAN/postrm
 # TODO: remove videofiles in other locations...
-echo 'if [ -f /home/video/st*.bin ]; then' >> DEBIAN/postrm
-echo '   rm /home/video/st*.bin' >> DEBIAN/postrm
-echo 'fi' >> DEBIAN/postrm
-chmod 755 DEBIAN/postrm
+# echo 'if [ -f /home/video/st*.bin ]; then' >> DEBIAN/postrm
+# echo '   rm /home/video/st*.bin' >> DEBIAN/postrm
+# echo 'fi' >> DEBIAN/postrm
+# chmod 755 DEBIAN/postrm
 
 # --- Make delayerd and COPY FILES ---
 cd ../../..

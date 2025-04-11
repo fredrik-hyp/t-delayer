@@ -33,6 +33,9 @@ sudo systemctl start delayerd@'st1'.service
 ## Control
 Control of the delayer is done via AWS IoT.
 
+The repo streammanagercontroldaemon is used for this and needs to be compiled with delayercontrol support using the build.sh script. It is available from version 1.1.0.
+
+
 
 
 

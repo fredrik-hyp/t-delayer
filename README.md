@@ -30,6 +30,8 @@ Also but the mount in /etc/fstab
 sudo systemctl start delayerd@'st1'.service
 ```
 
+There is no autostart feature available instead it is assumed that control and monitoring should be done via IoT described below.
+
 ## Control
 Control of the delayer is done via AWS IoT.
 

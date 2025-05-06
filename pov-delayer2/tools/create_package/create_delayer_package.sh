@@ -14,10 +14,10 @@ chmod 755 DEBIAN
 
 # --- DEBIAN/control ---
 echo 'Package: delayer' > DEBIAN/control
-echo 'Version: 4.0.0' >> DEBIAN/control
+echo 'Version: 4.0.0.1' >> DEBIAN/control
 echo 'Section: base' >> DEBIAN/control
 echo 'Priority: optional' >> DEBIAN/control
-echo 'Architecture: arm64' >> DEBIAN/control
+echo 'Architecture: amd64' >> DEBIAN/control
 echo 'Depends: libpq5, postgresql-14' >> DEBIAN/control
 echo 'Maintainer: Christoffer Branzell<christoffer@polylegio.se>' >> DEBIAN/control
 echo 'Description: Polylegio Delayerd' >> DEBIAN/control

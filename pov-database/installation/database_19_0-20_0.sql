@@ -1,5 +1,5 @@
 ALTER TABLE streaminterfacebackupsinks ADD COLUMN rawudp BOOLEAN default false;
-ALTER TABLE streaminterfacebackupsinks ADD COLUMN ttl BIGINT default 1;
+ALTER TABLE streaminterfacebackupsinks ADD COLUMN ttl BIGINT default 7;
 
 CREATE TABLE delayerconfigs
 (

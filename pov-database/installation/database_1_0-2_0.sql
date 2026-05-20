@@ -6,7 +6,7 @@ CREATE TABLE streaminterfaceruninfos(
 	startstopinfo TEXT --autostarted, userstarted, userstopped
 );
 
-ALTER TABLE streaminterfacesinks ADD COLUMN ttl INTEGER DEFAULT 1;
+ALTER TABLE streaminterfacesinks ADD COLUMN ttl INTEGER DEFAULT 7;
 
 ALTER TABLE streaminterfacelivestatistics ADD COLUMN rtt INTEGER;
 ALTER TABLE streaminterfacelivestatistics ADD COLUMN timestamp TIMESTAMP DEFAULT now();

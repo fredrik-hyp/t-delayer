@@ -13,12 +13,34 @@ mkdir -p tmp
 mkdir -p DEBIAN
 chmod 755 DEBIAN
 
+if [ "$#" -ge 1 ]; then
+    _ARCH="$1"
+else
+    _ARCH="$(uname -m)"
+fi
+
+case "$_ARCH" in
+    x86_64)
+        DEB_ARCH="amd64"
+        ;;
+    aarch64)
+        DEB_ARCH="arm64"
+        ;;
+    armv7l)
+        DEB_ARCH="armhf"
+        ;;
+    *)
+        echo "Unsupported architecture: $_ARCH" >&2
+        exit 1
+        ;;
+esac
+
 # --- DEBIAN/control ---
 echo 'Package: delayer' > DEBIAN/control
 echo 'Version: 4.0.0.1' >> DEBIAN/control
 echo 'Section: base' >> DEBIAN/control
 echo 'Priority: optional' >> DEBIAN/control
-echo 'Architecture: arm64' >> DEBIAN/control
+echo "Architecture: ${DEB_ARCH}" >> DEBIAN/control
 echo 'Depends: libpq5, postgresql-16' >> DEBIAN/control
 echo 'Maintainer: Christoffer Branzell<christoffer@polylegio.se>' >> DEBIAN/control
 echo 'Description: Polylegio Delayerd' >> DEBIAN/control

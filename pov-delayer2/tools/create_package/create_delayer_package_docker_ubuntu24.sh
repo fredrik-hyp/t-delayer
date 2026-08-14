@@ -42,7 +42,7 @@ echo 'Section: base' >> DEBIAN/control
 echo 'Priority: optional' >> DEBIAN/control
 echo "Architecture: ${DEB_ARCH}" >> DEBIAN/control
 echo 'Depends: libpq5, postgresql-16' >> DEBIAN/control
-echo 'Maintainer: Christoffer Branzell<christoffer@polylegio.se>' >> DEBIAN/control
+echo 'Maintainer: Fredrik Nilsson<fredrik@polylegio.se>' >> DEBIAN/control
 echo 'Description: Polylegio Delayerd' >> DEBIAN/control
 
 # --- DEBIAN/postinst create /etc/rc.local ---

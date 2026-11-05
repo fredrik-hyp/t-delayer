@@ -282,7 +282,7 @@ int db_fetch_recording(PGconn **conn, s_recordings *recording, uint64_t recorder
 	}
 
 	// == recording name ==
-	strncpy(recording[i].state, PQgetvalue(res, i, 6), DB_MAX_NAME_LENGTH);
+	strncpy(recording[i].state, PQgetvalue(res, i, 6), DB_MAX_STATE);
 	if (strncmp(recording[i].state, "init", 4) == 0)
 		recording[i].e_state = INIT;
 	else if (strncmp(recording[i].state, "recording", 9) == 0)
@@ -447,7 +447,7 @@ int db_fetch_recordingbyname(PGconn **conn, s_recordings *recording, char *name)
 	}
 
 	// == recording name ==
-	strncpy(recording[i].state, PQgetvalue(res, i, 6), DB_MAX_NAME_LENGTH);
+	strncpy(recording[i].state, PQgetvalue(res, i, 6), DB_MAX_STATE);
 	if (strncmp(recording[i].state, "init", 4) == 0)
 		recording[i].e_state = INIT;
 	else if (strncmp(recording[i].state, "recording", 9) == 0)
@@ -1688,9 +1688,9 @@ int db_insert_playercom(PGconn **conn, s_playercoms *playercom)
 		*startplayat=NULL,
 		*jumptopos=NULL,
 		*playto=NULL;
-	char startplayatq[DB_MAX_MODE_LENGTH],
-		jumptoposq[DB_MAX_MODE_LENGTH],
-		playtoq[DB_MAX_MODE_LENGTH],
+	char startplayatq[DB_MAX_TIMESTAMP+32],
+		jumptoposq[DB_MAX_TIMESTAMP+32],
+		playtoq[DB_MAX_TIMESTAMP+32],
 		create_timestampq[DB_MAX_MODE_LENGTH];
 	char insert_query[BIG_QUERY_LEN];
 	int insert_len;
@@ -1709,9 +1709,9 @@ int db_insert_playercom(PGconn **conn, s_playercoms *playercom)
 		return 2;
 	}
 
-	memset(startplayatq, 0, DB_MAX_MODE_LENGTH);
-	memset(jumptoposq, 0, DB_MAX_MODE_LENGTH);
-	memset(playtoq, 0, DB_MAX_MODE_LENGTH);
+	memset(startplayatq, 0, sizeof(startplayatq));
+	memset(jumptoposq, 0, sizeof(jumptoposq));
+	memset(playtoq, 0, sizeof(playtoq));
 	memset(create_timestampq, 0, DB_MAX_MODE_LENGTH);
 	memset(insert_query, 0, BIG_QUERY_LEN);
 	
@@ -1748,12 +1748,12 @@ int db_insert_playercom(PGconn **conn, s_playercoms *playercom)
 
 	if (strlen(playercom->startplayat) == 0)
 	{
-		snprintf(startplayatq, DB_MAX_MODE_LENGTH,
+		snprintf(startplayatq, sizeof(startplayatq),
 			"%s", "NULL");
 	}
 	else
 	{
-		 snprintf(startplayatq, DB_MAX_MODE_LENGTH,
+		 snprintf(startplayatq, sizeof(startplayatq),
 			"to_timestamp(%s)", playercom->startplayat);
 	}
 	startplayat = pqescape(startplayatq);
@@ -1766,12 +1766,12 @@ int db_insert_playercom(PGconn **conn, s_playercoms *playercom)
 	
 	if (strlen(playercom->jumptopos) == 0)
 	{
-		snprintf(jumptoposq, DB_MAX_MODE_LENGTH,
+		snprintf(jumptoposq, sizeof(jumptoposq),
 			"%s", "NULL");
 	}
 	else
 	{
-		snprintf(jumptoposq, DB_MAX_MODE_LENGTH,
+		snprintf(jumptoposq, sizeof(jumptoposq),
 			"to_timestamp(%s)", playercom->jumptopos);
 	}
 	jumptopos = pqescape(jumptoposq);
@@ -1784,12 +1784,12 @@ int db_insert_playercom(PGconn **conn, s_playercoms *playercom)
 
 	if (strlen(playercom->playto) == 0)
 	{
-		snprintf(playtoq, DB_MAX_MODE_LENGTH,
+		snprintf(playtoq, sizeof(playtoq),
 			"%s", "NULL");
 	}
 	else
 	{
-		snprintf(playtoq, DB_MAX_MODE_LENGTH,
+		snprintf(playtoq, sizeof(playtoq),
 			"to_timestamp(%s)", playercom->playto);
 	}
 	playto = pqescape(playtoq);

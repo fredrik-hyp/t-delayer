@@ -19,8 +19,8 @@
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 
-#include "../../prot_rudp.h"
-#include "../../print_struct.h"
+#include "../../../pov-common/prot_rudp.h"
+#include "../../../pov-common/print_struct.h"
 
 #define STAT_LENGTH 2100
 

@@ -1,0 +1,13 @@
+T-Delayer Ubuntu 26.04 artifacts
+target_arch=arm64
+built_at=2026-08-31T16:30:50Z
+
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/delayer: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=2c7030d6b0797e049ddd7e8183dc14330c293078, for GNU/Linux 3.7.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/recorder: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=b9cc560d571238b58747a35696370c9adffe39c1, for GNU/Linux 3.7.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/delayer-recorder: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=b9cc560d571238b58747a35696370c9adffe39c1, for GNU/Linux 3.7.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/delayer-player: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=2c7030d6b0797e049ddd7e8183dc14330c293078, for GNU/Linux 3.7.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/read_chunk_file: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=27d846ba08e5dc8f59e3fafbea7b06d438788fb5, for GNU/Linux 3.7.0, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/mc_receiver: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=35432afd23d3f36a51ed7d0a8e054c6abb7f98c5, for GNU/Linux 3.7.0, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64/bin/show_statistic: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=9a9fde5ab9d6b7d7920e3b71e131315d9c9f1e9a, for GNU/Linux 3.7.0, not stripped
+
+Artifacts written to /Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/arm64

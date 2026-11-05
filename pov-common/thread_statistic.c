@@ -382,6 +382,74 @@ void *thread_statistic(void *arg)
 		break;
 
 	case RECORDER:
+		{
+		strncpy(streamstats[statarg->num_paths].source_host,
+				statarg->source[0].host,
+				DB_MAX_HOSTNAME_LENGTH);
+		streamstats[statarg->num_paths].sink_host[0] = '\0';
+
+		streamstats[statarg->num_paths].streaminterface_id = statarg->id;
+		strncpy(streamstats[statarg->num_paths].mode, statarg->mode, DB_MAX_MODE_LENGTH);
+		streamstats[statarg->num_paths].source_port = statarg->source[0].port;
+		streamstats[statarg->num_paths].sink_port = 0;
+		streamstats[statarg->num_paths].pathnumber = 100;
+		strncpy(streamstats[statarg->num_paths].pathname, statarg->source[0].name, DB_MAX_NAME_LENGTH);
+		streamstats[statarg->num_paths].multipath = statarg->config->multipath;
+		streamstats[statarg->num_paths].mploadbalance = statarg->config->mploadbalance;
+
+		snprintf(streaminterfacelivestatistic[statarg->num_paths].source,
+				DB_MAX_HOSTNAME_PORT_LENGTH, "%s:%d",
+				statarg->source[0].host,
+				statarg->source[0].port);
+		streaminterfacelivestatistic[statarg->num_paths].destination[0] = '\0';
+
+		streaminterfacelivestatistic[statarg->num_paths].pathnumber = 100;
+		strncpy(streaminterfacelivestatistic[statarg->num_paths].pathname,
+			statarg->source[0].name, DB_MAX_NAME_LENGTH);
+		strncpy(streaminterfacelivestatistic[statarg->num_paths].mode,
+			statarg->mode, DB_MAX_MODE_LENGTH);
+		streaminterfacelivestatistic[statarg->num_paths].streaminterface_id = statarg->id;
+		streaminterfacelivestatistic[statarg->num_paths].ttl = 0;
+		streaminterfacelivestatistic[statarg->num_paths].multipath = statarg->config->multipath;
+		streaminterfacelivestatistic[statarg->num_paths].mploadbalance = statarg->config->mploadbalance;
+		streaminterfacelivestatistic[statarg->num_paths].hostclientcertificate_id = 0;
+		streaminterfacelivestatistic[statarg->num_paths].talkbackclientcertificate_id = 0;
+
+		for (i = 0; i < statarg->num_paths; i++)
+		{
+			strncpy(streamstats[i].source_host,
+					statarg->source[0].host,
+					DB_MAX_HOSTNAME_LENGTH);
+			streamstats[i].sink_host[0] = '\0';
+
+			streamstats[i].streaminterface_id = statarg->id;
+			strncpy(streamstats[i].mode, statarg->mode, DB_MAX_MODE_LENGTH);
+			streamstats[i].source_port = statarg->source[0].port;
+			streamstats[i].sink_port = 0;
+			streamstats[i].pathnumber = i;
+			strncpy(streamstats[i].pathname, statarg->source[0].name, DB_MAX_NAME_LENGTH);
+			streamstats[i].multipath = statarg->config->multipath;
+			streamstats[i].mploadbalance = statarg->config->mploadbalance;
+
+			snprintf(streaminterfacelivestatistic[i].source,
+					DB_MAX_HOSTNAME_PORT_LENGTH,
+					"%s:%d",
+					statarg->source[0].host,
+					statarg->source[0].port);
+			streaminterfacelivestatistic[i].destination[0] = '\0';
+			streaminterfacelivestatistic[i].pathnumber = i;
+			strncpy(streaminterfacelivestatistic[i].pathname, statarg->source[0].name, DB_MAX_NAME_LENGTH);
+			strncpy(streaminterfacelivestatistic[i].mode, statarg->mode, DB_MAX_MODE_LENGTH);
+			streaminterfacelivestatistic[i].streaminterface_id = statarg->id;
+			streaminterfacelivestatistic[i].ttl = 0;
+			streaminterfacelivestatistic[i].multipath = statarg->config->multipath;
+			streaminterfacelivestatistic[i].mploadbalance = statarg->config->mploadbalance;
+			streaminterfacelivestatistic[i].hostclientcertificate_id = 0;
+			streaminterfacelivestatistic[i].talkbackclientcertificate_id = 0;
+		}
+		}
+		break;
+
 	case PLAYER:
 		{
 		// From transmitter
@@ -581,6 +649,15 @@ void *thread_statistic(void *arg)
 				}
 				break;
 			case RECORDER:
+				for (i = 0; i < statarg->num_paths; i++)
+				{
+					streamstats[i].bitrate_out = 0;
+					streamstats[i].bitrate_in = transfered_bytes_mc_udp;
+					streamstats[i].bitrate = streamstats[i].bitrate_in;
+					statarg->rudp_sequence_list->acc_transfered_bytes_rudp_per_path[i] = 0;
+					statarg->rudp_sequence_list->transfered_bytes_rudp_per_path[i] = 0;
+				}
+				break;
 			case PLAYER:
 				for (i = 0; i < statarg->num_paths; i++)
 				{
@@ -716,9 +793,9 @@ void *thread_statistic(void *arg)
 				break;
 			case RECORDER:
 				{
-				streamstats[statarg->num_paths].bitrate_out = statarg->rt_stats->stat_outbytes * 8;
-				streamstats[statarg->num_paths].bitrate_in = statarg->rt_stats->stat_inbytes * 8;
-				streamstats[statarg->num_paths].bitrate = streamstats[statarg->num_paths].bitrate_out;
+				streamstats[statarg->num_paths].bitrate_out = 0;
+				streamstats[statarg->num_paths].bitrate_in = transfered_bytes_mc_udp;
+				streamstats[statarg->num_paths].bitrate = streamstats[statarg->num_paths].bitrate_in;
 
 				if (streamstats[statarg->num_paths].bitrate_in == 0 && lost_input == false)
 				{
@@ -941,6 +1018,19 @@ void *thread_statistic(void *arg)
 				}
 				break;
 			case RECORDER:
+				for (i = 0; i < statarg->num_paths; i++)
+				{
+					streaminterfacelivestatistic[i].bitratein = total_inbytes*8 / STAT_AVERAGE_SECONDS;
+					streaminterfacelivestatistic[i].bitrateout = 0;
+					streaminterfacelivestatistic[i].bufferlevel = bufferlevel;
+					streaminterfacelivestatistic[i].udpdrops = statarg->rt_stats->stat_udpdrops;
+					streaminterfacelivestatistic[i].rtt = statarg->rt_stats->stat_average_rtt[i];
+					streaminterfacelivestatistic[i].acc_rtp_drops = acc_rtp_drops;
+					snprintf(streaminterfacelivestatistic[i].state, DB_MAX_STATE, "%s", "recording");
+					statarg->rudp_sequence_list->acc_transfered_bytes_rudp_per_path[i] = 0;
+					statarg->rudp_sequence_list->transfered_bytes_rudp_per_path[i] = 0;
+				}
+				break;
 			case PLAYER:
 				for (i = 0; i < statarg->num_paths; i++)
 				{
@@ -972,7 +1062,14 @@ void *thread_statistic(void *arg)
 			streaminterfacelivestatistic[statarg->num_paths].udpdrops = statarg->rt_stats->stat_udpdrops;
 			streaminterfacelivestatistic[statarg->num_paths].rtt = statarg->rt_stats->stat_average_rtt[0];
 			streaminterfacelivestatistic[statarg->num_paths].acc_rtp_drops = acc_rtp_drops;
-			snprintf(streaminterfacelivestatistic[statarg->num_paths].state, DB_MAX_STATE, "%s", "sending");
+			if (statarg->process_mode == RECORDER)
+			{
+				snprintf(streaminterfacelivestatistic[statarg->num_paths].state, DB_MAX_STATE, "%s", "recording");
+			}
+			else
+			{
+				snprintf(streaminterfacelivestatistic[statarg->num_paths].state, DB_MAX_STATE, "%s", "sending");
+			}
 			
 			// === UPDATE DB WITH STATS ABOUT THE INTERFACE ===
 #ifdef TRYLOCK
@@ -1003,7 +1100,7 @@ void *thread_statistic(void *arg)
 				db_insert_delayerstats(statarg->dbconn, &(statarg->d_stats[i]));
 #endif
 #ifdef RECORDERD
-				int ret = db_insert_recorderstats(statarg->dbconn, &(statarg->r_stats[i]));
+				db_insert_recorderstats(statarg->dbconn, &(statarg->r_stats[i]));
 #endif
 #ifdef PLAYERD
 				db_insert_playerstats(statarg->dbconn, &(statarg->p_stats[i]));

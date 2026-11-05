@@ -1,0 +1,14 @@
+T-Delayer Ubuntu 26.04 artifacts
+target_arch=amd64
+built_at=2026-08-31T16:48:03Z
+
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/delayer: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=a606fbe09027530767731aaf41dec5794e10ce91, for GNU/Linux 3.2.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/recorder: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4e3a634d4e24c0f2ed9d80727696a611fe02707e, for GNU/Linux 3.2.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/player: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=d990d2622dc8d6a9734060520e88a34ef34e97ba, for GNU/Linux 3.2.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/delayer-recorder: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=4e3a634d4e24c0f2ed9d80727696a611fe02707e, for GNU/Linux 3.2.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/delayer-player: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=d990d2622dc8d6a9734060520e88a34ef34e97ba, for GNU/Linux 3.2.0, with debug_info, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/read_chunk_file: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=10ce4eb85bd4e89994b61716ec50d2b0e451603f, for GNU/Linux 3.2.0, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/mc_receiver: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=d28e14ad32f562482d420af75df83b5da8d7e5a8, for GNU/Linux 3.2.0, not stripped
+/Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64/bin/show_statistic: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=334934258c5c95b66c0f51258dd6752242bdf604, for GNU/Linux 3.2.0, not stripped
+
+Artifacts written to /Users/fredriknilsson/Documents/Codex/t-delayer/build-artifacts/ubuntu-26.04/amd64

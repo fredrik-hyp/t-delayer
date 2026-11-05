@@ -15,6 +15,7 @@
 # tags/v2.0.0-rc1
 
 CC=cc
+CXX=g++
 CFLAGS=" -DVERSION=\"3.1.4_dev\""
 POV_MANAGER_VERSION="master"
 
@@ -253,11 +254,34 @@ fi
 
 
 echo "Compile"
+CXXFLAGS=$(printf '%s' "$CFLAGS" | sed 's/-std=gnu99/-std=gnu++11/g')
 
 echo "============================delayer============================="
 echo "$CC $INCLUDE -D DELAYERD $CFLAGS delayer_main.c delayer_other.c $DELAYERSRC  $DELAYERLIBFLAGS -o delayer"
 echo ""
 $CC $INCLUDE -D DELAYERD $CFLAGS delayer_main.c delayer_other.c ../pov-database/src/c/dbdelayers.c $DELAYERSRC  $DELAYERLIBFLAGS -o delayer
+
+echo "============================recorder============================"
+echo "$CC $INCLUDE -D RECORDERD $CFLAGS recorder_main.c delayer_other.c ../pov-database/src/c/dbrecplay.c $DELAYERSRC  $DELAYERLIBFLAGS -o recorder"
+echo ""
+$CC $INCLUDE -D RECORDERD $CFLAGS recorder_main.c delayer_other.c ../pov-database/src/c/dbrecplay.c $DELAYERSRC  $DELAYERLIBFLAGS -o recorder
+
+echo "=============================player============================="
+PLAYEROBJDIR=".player-build"
+PLAYERSRC="../pov-common/common.c ../pov-common/common-db.c ../pov-common/common-time.c ../pov-common/prot_rudp.c"
+PLAYERSRC=$PLAYERSRC" ../pov-database/src/c/dbcommon.c ../pov-database/src/c/dbstreaminterfaces.c ../pov-database/src/c/dbsysteminfo.c ../pov-database/src/c/dbrecplay.c"
+PLAYEROBJS=""
+mkdir -p "$PLAYEROBJDIR"
+for src in $PLAYERSRC; do
+	obj="$PLAYEROBJDIR/$(basename "$src" .c).o"
+	echo "$CC $INCLUDE $CFLAGS -c $src -o $obj"
+	$CC $INCLUDE $CFLAGS -c "$src" -o "$obj" || exit 1
+	PLAYEROBJS="$PLAYEROBJS $obj"
+done
+echo "$CXX $INCLUDE $CXXFLAGS -c player_main.cpp -o $PLAYEROBJDIR/player_main.o"
+$CXX $INCLUDE $CXXFLAGS -c player_main.cpp -o "$PLAYEROBJDIR/player_main.o" || exit 1
+echo "$CXX $PLAYEROBJDIR/player_main.o $PLAYEROBJS $DELAYERLIBFLAGS -o player"
+$CXX "$PLAYEROBJDIR/player_main.o" $PLAYEROBJS $DELAYERLIBFLAGS -o player || exit 1
 
 
 if [ $TESTTOOL = 1 ]; then
@@ -276,10 +300,14 @@ echo ""
 if [ $INSTALL = 1 ]; then
 	echo "Installing"
 	install -m 555 delayer /usr/sbin/
+	install -m 555 recorder /usr/sbin/
+	install -m 555 player /usr/sbin/
 fi
 if [ $INSTALL_PACKAGE = 1 ]; then
 	echo "Installing into pov-delayer2/tools/create_package/delayer-4.0.0"
 	install -m 555 delayer tools/create_package/delayer-4.0.0/usr/local/bin/
+	install -m 555 recorder tools/create_package/delayer-4.0.0/usr/local/bin/
+	install -m 555 player tools/create_package/delayer-4.0.0/usr/local/bin/
 fi
 
 echo "done"

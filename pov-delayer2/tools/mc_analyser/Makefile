@@ -11,8 +11,8 @@ mc_receiver: receiver.o print_struct.o
 receiver.o: receiver.c
 	$(CC) $(CFLAGS) $(IFLAGS) receiver.c
 
-print_struct.o: ../../print_struct.c
-	$(CC) $(CFLAGS) $(IFLAGS) ../../print_struct.c
+print_struct.o: ../../../pov-common/print_struct.c
+	$(CC) $(CFLAGS) $(IFLAGS) ../../../pov-common/print_struct.c
 
 clean:
 	rm *.o mc_receiver

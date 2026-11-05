@@ -1,0 +1,11 @@
+[Unit]
+Description=Play a recorded stream
+
+[Service]
+Type=forking
+Environment="INTERFACE_ID=%I"
+ExecStart=/usr/sbin/player $INTERFACE_ID
+ExecStop=/bin/sh -c 'kill $(cat /var/run/udp_player_$INTERFACE_ID.pid)'
+
+[Install]
+WantedBy=multi-user.target

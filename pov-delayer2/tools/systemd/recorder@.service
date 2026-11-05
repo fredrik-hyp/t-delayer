@@ -1,0 +1,11 @@
+[Unit]
+Description=Record a multicast stream
+
+[Service]
+Type=forking
+Environment="INTERFACE_ID=%I"
+ExecStart=/usr/sbin/recorder $INTERFACE_ID
+ExecStop=/bin/sh -c 'kill $(cat /var/run/udp_recorder_$INTERFACE_ID.pid)'
+
+[Install]
+WantedBy=multi-user.target

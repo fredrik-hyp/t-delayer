@@ -37,6 +37,45 @@ Control of the delayer is done via AWS IoT.
 
 The repo streammanagercontroldaemon is used for this and needs to be compiled with delayercontrol support using the build.sh script. It is available from version 1.1.0.
 
+## Remote control API
+
+`pov-database/src/php/remotecontrol.php` exposes a JSON API for external schedulers. Access is allowed by either bearer token or source IP configured in `remotecontrolclients`.
+
+Token values are stored as lowercase SHA-256 hex:
+
+```sql
+INSERT INTO remotecontrolclients (name, token_hash)
+VALUES ('scheduler', '<sha256-of-token>');
+```
+
+IP based access can be exact IPv4 or CIDR:
+
+```sql
+INSERT INTO remotecontrolclients (name, allowed_ip)
+VALUES ('scheduler-net', '192.0.2.10');
+```
+
+Important actions:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"reserve_output","player":"player1","startplayat":"2026-09-23T12:00:00Z","request_id":"job-123"}' \
+  http://host/remotecontrol.php
+```
+
+Output reservations may be created no earlier than 60 seconds before `startplayat`. The API reserves by actual output `host:port`, so different player configs cannot silently use the same multicast output.
+
+Playback commands fail with `409 output_in_use` if the output is already reserved or currently playing:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"playback_command","player":"player1","reservation_id":42,"player_action":"jump","recording_id":7,"jumptopos":"2026-09-23T11:30:00Z"}' \
+  http://host/remotecontrol.php
+```
+
+Inputs and outputs can be added with `create_interface`, `add_input`, and `add_output`. Recorder/player processes can be started or stopped with `process_command` if the web user has systemd permission and the service templates in `pov-delayer2/tools/systemd/` are installed.
 
 
 

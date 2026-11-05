@@ -1,0 +1,23 @@
+{
+  "instances": [
+    {
+      "name": "st1",
+      "autostart": true,
+      "msbuffer": 3600000,
+      "source": {"host": "239.10.0.1", "port": 1234},
+      "outputs": [
+        {"name": "Program", "host": "239.20.0.1", "port": 1234, "ttl": 7, "rawudp": false},
+        {"name": "Backup", "host": "239.20.0.2", "port": 1234, "ttl": 7, "rawudp": true}
+      ]
+    },
+    {
+      "name": "st2",
+      "autostart": false,
+      "msbuffer": 3600000,
+      "source": {"host": "239.10.0.2", "port": 1234},
+      "outputs": [
+        {"name": "Program", "host": "239.20.0.3", "port": 1234, "ttl": 7, "rawudp": false}
+      ]
+    }
+  ]
+}

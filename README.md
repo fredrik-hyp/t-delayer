@@ -3,6 +3,14 @@ This is a disk based delayer that can store hours of material and output it a la
 
 It is based on Ubuntu 22.04.
 
+## Docker med webbkontroll
+
+Kör en eller flera delayerinstanser per container med nginx och ett webbgränssnitt
+för konfiguration av inputs/outputs, livestatus och individuell uppspelningsstyrning
+av varje output utan processomstart.
+Se [Docker-instruktionerna](docker-runtime/README.md) för konfiguration, start,
+multicast på Linux och integrationstest.
+
 ## Installation
 ```
 sudo dpkg -i delayer-4.0.0

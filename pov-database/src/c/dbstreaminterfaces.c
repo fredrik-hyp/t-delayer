@@ -1388,7 +1388,7 @@ int dbfetch_streaminterfacebackupsink_by_streaminterfacesinkid(PGconn **conn,
 		" maxretrytime, streammissfailovertimeout, priority, maxbps, rawudp, ttl"\
 		" FROM streaminterfacebackupsinks "\
 		" WHERE streaminterfacesink_id=%" PRIu64		
-		" ORDER BY priority",
+		" ORDER BY priority, id",
 		streaminterfacesink_id);
 
 	if (len == MEDIUM_QUERY_LEN || len < 0)

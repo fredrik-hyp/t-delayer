@@ -1,0 +1,12 @@
+# Linux production multicast: share the host network. No Docker port mapping.
+services:
+  database:
+    ports:
+      - '127.0.0.1:${DB_PORT:-55432}:5432'
+  delayer:
+    network_mode: host
+    ports: !reset []
+    environment:
+      PGHOST: 127.0.0.1
+      PGPORT: ${DB_PORT:-55432}
+      WEB_PORT: ${WEB_PORT:-8080}

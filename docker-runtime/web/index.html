@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T-Delayer · Kontrollrum</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Kontrollrum</span></div></div><div id="connection" role="status">Ansluter…</div></header>
+  <main>
+    <div class="intro"><div><p class="eyebrow">MULTICAST / DRIFT</p><h1>Strömmar under kontroll.</h1><p>Live-status och individuell uppspelning för varje output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><button id="add-instance" class="primary" disabled>Ny instans</button></div></div>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <div id="instances"><p class="empty">Hämtar instanser…</p></div>
+  </main>
+  <footer>Status hämtas varannan sekund. Tider visas i din lokala tidszon: <span id="timezone"></span>. Inspelning fortsätter när en output pausas.</footer>
+  <dialog id="command-dialog">
+    <form id="command-form">
+      <div class="dialog-heading"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Styr output</h2></div><button type="button" class="close" aria-label="Stäng">×</button></div>
+      <p id="command-help"></p>
+      <label id="jump-field">Inspelad tid<input type="datetime-local" name="jumptopos" step="1"></label>
+      <label id="schedule-field">Starta uppspelning vid (valfritt)<input type="datetime-local" name="startplayat" step="1"><small>Tomt fält: hoppa till positionen och pausa. Välj Spela för att fortsätta.</small></label>
+      <label id="end-field">Stoppa vid klockslag (valfritt)<input type="datetime-local" name="playto" step="1"><small>Tomt fält tar bort eventuell sluttid.</small></label>
+      <p class="form-error" id="form-error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" class="cancel">Avbryt</button><button type="submit" class="primary">Skicka kommando</button></div>
+    </form>
+  </dialog>
+  <dialog id="configuration-dialog">
+    <form id="configuration-form">
+      <div class="dialog-heading"><div><p class="eyebrow">INPUT &amp; OUTPUTS</p><h2 id="configuration-title">Ny instans</h2></div><button type="button" data-close-config class="close" aria-label="Stäng konfiguration">×</button></div>
+      <p>Konfigurationen sparas för nästa start av instansen. Uppspelningsstyrning fungerar separat under drift.</p>
+      <div class="config-grid">
+        <label>Instansnamn<input name="instance_name" required maxlength="40" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,39}" autocomplete="off"></label>
+        <label>Buffert (minuter)<input name="buffer_minutes" type="number" required min="0.167" max="35791" step="any" value="60"></label>
+      </div>
+      <label class="checkbox"><input type="checkbox" name="autostart">Starta automatiskt när containern startar</label>
+      <fieldset><legend>Input · UDP multicast</legend><div class="config-grid">
+        <label>Multicastadress<input name="source_host" required placeholder="239.10.0.1" autocomplete="off"></label>
+        <label>Port<input name="source_port" type="number" required min="1" max="65535" value="1234"></label>
+      </div></fieldset>
+      <div class="outputs-heading"><h3>Outputs</h3><button type="button" id="add-output">Lägg till output</button></div>
+      <div id="configuration-outputs"></div>
+      <p class="form-error" id="configuration-error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" data-close-config>Avbryt</button><button type="submit" class="primary">Spara konfiguration</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

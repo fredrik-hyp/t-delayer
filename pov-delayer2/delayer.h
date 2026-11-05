@@ -157,6 +157,8 @@ typedef struct _thread_disc_cleaner_arg
 
 int find_time(char *name, uint32_t file_id, uint64_t searched_time, s_pause_arg *pause);
 int taste_file(char *name, s_file_info *file);
+int find_time_in_buffer(char *name, uint32_t oldest_id, uint32_t newest_id,
+	uint64_t searched_time, s_pause_arg *pause);
 
 void *thread_disccleaner(void *arg);
 

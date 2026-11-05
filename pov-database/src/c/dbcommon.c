@@ -1,5 +1,19 @@
 #include "dbcommon.h"
 
+/* Keep the installed defaults, but allow containers and remote databases to use
+ * the standard libpq PG* environment variables for both ping and connect. */
+static const char *DBConnectionDefaults(void)
+{
+#ifndef DATABASENAME
+#define DATABASENAME "delayerdb"
+#endif
+
+	if (getenv("PGHOST") || getenv("PGHOSTADDR") || getenv("PGDATABASE") ||
+		getenv("PGUSER") || getenv("PGSERVICE"))
+		return "";
+	return "dbname=" DATABASENAME " host=localhost user=postgres";
+}
+
 PGconn *DBConnect()
 {
 	if (DBIsAvailable() == 0)
@@ -10,13 +24,7 @@ PGconn *DBConnect()
 
 	PGconn *dbconn;
 
-#ifndef DATABASENAME
-	dbconn = PQconnectdb("dbname=delayerdb host=localhost user=postgres");
-#else
-	char connstring[2000];
-	sprintf(connstring, "dbname=%s host=localhost user=postgres", DATABASENAME);
-	dbconn = PQconnectdb(connstring);
-#endif
+	dbconn = PQconnectdb(DBConnectionDefaults());
 	if (PQstatus(dbconn) == CONNECTION_BAD)
 	{
 		PQfinish(dbconn);
@@ -62,7 +70,7 @@ int check_DB_connection_and_reconnect(PGconn **dbconn)
 int DBIsAvailable()
 {
 	PGPing pingresult;
-	pingresult = PQping("dbname=delayerdb host=localhost user=postgres");
+	pingresult = PQping(DBConnectionDefaults());
 	
 	switch(pingresult)
 	{

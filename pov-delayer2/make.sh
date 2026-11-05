@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -e
+
 #########################
 #     VERSION SETUP     #
 #########################
@@ -184,6 +186,7 @@ echo "usage: ./make.sh [noarg | -d | -dX] [-g|-T] [-m] [-p]"
 echo "  [noarg] release + install"
 echo "---------------------------------------------------"
 echo "  debug builds are not supposed to run in daemonized mode"
+echo "  -f foreground release build, no install"
 echo "  -d debug build"
 echo "  -db debug build buffer"
 echo "  -ds debug build SQL"
@@ -198,6 +201,10 @@ echo ""
 if [ $# -eq 0 ]; then
 	echo "Compile and install - no debug printouts"
 	INSTALL=1
+elif [ "$1" = "-f" ]; then
+	echo "Foreground release compile, no install"
+	INSTALL=0
+	CFLAGS=$CFLAGS" -O2"
 elif [ "$1" = "-db" ]; then
 	echo "Debug compile buffer.c"
 	INSTALL=0

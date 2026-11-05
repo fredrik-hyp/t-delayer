@@ -309,6 +309,7 @@ int main(int argc, char **argv)
 			retval_mutex_read_file[MAX_INTERFACE_PATH];
 
 	int i;
+	unsigned int command_poll_ticks = 0;
 	int retval, pthread_ret;
 	struct timeval tv;
 	uint64_t now;
@@ -334,6 +335,7 @@ int main(int argc, char **argv)
 	memset(pause_info, 0, MAX_INTERFACE_PATH*sizeof(s_pause_arg));
 	memset(mc_sender_arg, 0, MAX_INTERFACE_PATH*sizeof(thread_mc_arg));
 	memset(reader_arg, 0, MAX_INTERFACE_PATH*sizeof(thread_disc_reader_arg));
+	memset(delayercom, 0, sizeof(delayercom));
 
 	memset(buffer_q_available, 0, (MAX_INTERFACE_PATH+1)*sizeof(buffer_queue));
 	memset(&buffer_q_disc, 0, sizeof(buffer_queue));
@@ -807,7 +809,7 @@ int main(int argc, char **argv)
 	}
 
 	delayercom[0].id=0;
-	delayercom[0].streaminterface_id = streaminterface.config.id;
+	delayercom[0].streaminterface_id = streaminterface.id;
 	delayercom[0].action[0]='\0';
 	delayercom[0].e_action=PLAY;
 	delayercom[0].jumptopos[0]='\0';
@@ -989,6 +991,19 @@ int main(int argc, char **argv)
 	// === Add how many interface will report RUDP statistics ===
 	rudp_sequence_list.num_paths = streaminterface.num_backup_sink+1;
 	rudp_sequence_list.mutex_stat = &mutex_stat;
+
+	/* Initialize before the statistics thread can read these records. */
+	memset(d_stats, 0, sizeof(d_stats));
+	pthread_ret = pthread_mutex_lock(&mutex_stat);
+	LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
+	for (i = 0; i < streaminterface.num_backup_sink+1; i++)
+	{
+		d_stats[i].streaminterface_id = streaminterface.id;
+		d_stats[i].pathnumber = i;
+		copy_process_state_string(dstate[i], d_stats[i].state);
+	}
+	pthread_ret = pthread_mutex_unlock(&mutex_stat);
+	LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
 
 	// === Create statistic thread ===
 	s_statarg statarg;
@@ -1262,17 +1277,6 @@ int main(int argc, char **argv)
 
 	// ------------ ALL THREADS ARE STARTED ------------
 
-	pthread_ret = pthread_mutex_lock(&mutex_stat);
-	LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
-	for (i = 0; i < streaminterface.num_backup_sink+1; i++)
-	{
-		d_stats[i].streaminterface_id = streaminterface.config.id;
-		d_stats[i].pathnumber = i;
-		copy_process_state_string(dstate[i], d_stats[i].state);
-	}
-	pthread_ret = pthread_mutex_unlock(&mutex_stat);
-	LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
-	
 	s_interfaceconfig tmpinterfaceconfig; //For passing on delay from database to streaminterface.config.msbuffer
 
 	while (pstate != STATE_SHUTDOWN)
@@ -1295,29 +1299,38 @@ int main(int argc, char **argv)
 			reread_delay_from_database = 0;
 		}
 
+		/* SIGUSR1 wakes us promptly. Poll as well: standard Unix signals can
+		 * coalesce, and a second command must not remain stranded in the queue. */
+		if (++command_poll_ticks >= 10)
+		{
+			command_poll_ticks = 0;
+			pthread_ret = pthread_mutex_lock(&mutex_dbconn);
+			LOG_PTHREAD_ERROR_CONTINUE(pthread_ret, interfacename, __LINE__);
+			if (db_count_delayercoms(&dbconn, streaminterface.id) > 0)
+				reread_config_from_database = 1;
+			pthread_ret = pthread_mutex_unlock(&mutex_dbconn);
+			LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
+		}
+
 		if (reread_config_from_database)
 		{
 			int num_fetched = 0;
 			pthread_ret = pthread_mutex_lock(&mutex_dbconn);
 			LOG_PTHREAD_ERROR_CONTINUE(pthread_ret, interfacename, __LINE__);
-			retval = db_fetch_delayercoms(&dbconn, delayercom, 1, &num_fetched, streaminterface.config.id);
+			retval = db_fetch_delayercoms(&dbconn, delayercom, 1, &num_fetched, streaminterface.id);
 			if (retval || num_fetched == 0)
 			{
-				// If it fails to fetch from database, try to remove all config for this interface
-				int retval_delete = db_delete_delayercoms(&dbconn, streaminterface.config.id);
-				logtodb_nolock(dbconn, streaminterface.id, POVLOGLEVEL_INFO,
-							   "%s: failed to read command", interfacename);
-
+				/* A coalesced or redundant wakeup may find an empty queue.
+				 * Never delete other commands on a read/connection failure. */
 				pthread_ret = pthread_mutex_unlock(&mutex_dbconn);
 				LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
-
-				add_trap_to_queue(TRAP_DELAYER_STOP, "Can not fetch delayercoms after signal");
-				LOGMSG(LOG_WARNING, "%s: Can not fetch delayercoms after signal (fetch %d - del %d)",
-					streaminterface.name, retval, retval_delete);
-
+				if (retval != 3)
+					LOGMSG(LOG_WARNING, "%s: Can not fetch delayercoms (fetch %d)",
+						streaminterface.name, retval);
 				reread_config_from_database = 0;
 				continue;
 			}
+
 			if (delayercom[0].pathnumber > streaminterface.num_backup_sink)
 			{
 				int retval_delete = db_delete_delayercomsbyid(&dbconn, delayercom[0].id);
@@ -1797,31 +1810,7 @@ int main(int argc, char **argv)
 					pthread_ret = pthread_mutex_lock(&pause_info[delayercom[0].pathnumber].mutex_pause);
 					LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
 					pause_info[delayercom[0].pathnumber].pause_time = mc_sender_arg[delayercom[0].pathnumber].stat_last_timestamp;
-					pause_info[delayercom[0].pathnumber].pause_file_id = read_file[delayercom[0].pathnumber].id;
-					if (pause_info[delayercom[0].pathnumber].pause_time < read_file[delayercom[0].pathnumber].start_time)
-					{
-						//TODO Check so we are not on the oldest file and do -- to a removed file
-#ifdef NODAEMON_DEBUG
-						fprintf(stderr, "%s[%"PRIu64"]: NOT IN THE read_file.id (%u) - before the readfile_id (%"PRIu64" < %"PRIu64")\n",
-								interfacename, delayercom[0].pathnumber,
-								pause_info[delayercom[0].pathnumber].pause_file_id,
-								pause_info[delayercom[0].pathnumber].pause_time,
-								read_file[delayercom[0].pathnumber].start_time);
-#endif
-						pause_info[delayercom[0].pathnumber].pause_file_id--;
-					}
-					else if (pause_info[delayercom[0].pathnumber].pause_time > read_file[delayercom[0].pathnumber].end_time)
-					{
-#ifdef NODAEMON_DEBUG
-						fprintf(stderr, "%s[%"PRIu64"]: NOT IN THE read_file.id (%u) - after the readfile_id (%"PRIu64" < %"PRIu64")\n",
-								interfacename, delayercom[0].pathnumber,
-								pause_info[delayercom[0].pathnumber].pause_file_id,
-								pause_info[delayercom[0].pathnumber].pause_time,
-								read_file[delayercom[0].pathnumber].end_time);
-#endif
-						pause_info[delayercom[0].pathnumber].pause_file_id++;
-					}
-					find_time_ret = find_time(streaminterface.name, pause_info[delayercom[0].pathnumber].pause_file_id,
+					find_time_ret = find_time_in_buffer(streaminterface.name, oldest_file.id, newest_file.id,
 						pause_info[delayercom[0].pathnumber].pause_time, &pause_info[delayercom[0].pathnumber]);
 					pthread_ret = pthread_mutex_unlock(&pause_info[delayercom[0].pathnumber].mutex_pause);
 					LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
@@ -1940,6 +1929,12 @@ int main(int argc, char **argv)
 			LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
 
 			reread_config_from_database = 0;
+			pthread_ret = pthread_mutex_lock(&mutex_dbconn);
+			LOG_PTHREAD_ERROR_CONTINUE(pthread_ret, interfacename, __LINE__);
+			if (db_count_delayercoms(&dbconn, streaminterface.id) > 0)
+				reread_config_from_database = 1;
+			pthread_ret = pthread_mutex_unlock(&mutex_dbconn);
+			LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
 		}
 
 
@@ -2050,25 +2045,7 @@ int main(int argc, char **argv)
 						pthread_ret = pthread_mutex_lock(&pause_info[i].mutex_pause);
 						LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
 						pause_info[i].pause_time = mc_sender_arg[i].stat_last_timestamp;
-						pause_info[i].pause_file_id = read_file[i].id;
-						if (pause_info[i].pause_time < read_file[i].start_time)
-						{
-							//TODO Check so we are not on the oldest file and do -- to a removed file
-#ifdef NODAEMON_DEBUG
-							fprintf(stderr, "%s[%d]: NOT IN THE read_file.id - before the readfile_id\n",
-									interfacename, i);
-#endif
-							pause_info[i].pause_file_id--;
-						}
-						else if (pause_info[i].pause_time > read_file[i].end_time)
-						{
-#ifdef NODAEMON_DEBUG
-							fprintf(stderr, "%s[%d]: NOT IN THE read_file.id - after the readfile_id\n",
-									interfacename, i);
-#endif
-							pause_info[i].pause_file_id++;
-						}
-						find_time_ret = find_time(streaminterface.name, pause_info[i].pause_file_id,
+						find_time_ret = find_time_in_buffer(streaminterface.name, oldest_file.id, newest_file.id,
 							pause_info[i].pause_time, &pause_info[i]);
 						pthread_ret = pthread_mutex_unlock(&pause_info[i].mutex_pause);
 						LOG_PTHREAD_ERROR(pthread_ret, interfacename, __LINE__);
@@ -2128,8 +2105,8 @@ int main(int argc, char **argv)
 #endif
 		for (i = 0; i < streaminterface.num_backup_sink+1; i++)
 		{
-			d_stats[i].startplayat_timestamp = delayercom[0].startplayat_timestamp;
-			d_stats[i].playto_timestamp = delayercom[0].playto_timestamp;
+			d_stats[i].startplayat_timestamp = start_play_at[i] == UINT64_MAX ? 0 : start_play_at[i];
+			d_stats[i].playto_timestamp = play_to[i] == UINT64_MAX ? 0 : play_to[i];
 
 			d_stats[i].startpos_timestamp = oldest_file.start_time;
 			d_stats[i].lastpos_timestamp = newest_file.end_time;

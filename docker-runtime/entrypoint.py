@@ -1,0 +1,35 @@
+"""Validate runtime settings and generate nginx config without shell interpolation."""
+import os
+from pathlib import Path
+import re
+import subprocess
+
+username = os.environ.get("WEB_USERNAME", "admin")
+password = os.environ.get("WEB_PASSWORD", "")
+if os.environ.get("WEB_PASSWORD_FILE"):
+    password = Path(os.environ["WEB_PASSWORD_FILE"]).read_text().rstrip("\n")
+if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", username) or not password or "\n" in password:
+    raise SystemExit("Set WEB_PASSWORD or WEB_PASSWORD_FILE, and a valid WEB_USERNAME")
+port = int(os.environ.get("WEB_PORT", "8080"))
+if not 1 <= port <= 65535:
+    raise SystemExit("WEB_PORT must be between 1 and 65535")
+for directory in ("/run/delayer", "/run/delayerd", "/home/video"):
+    Path(directory).mkdir(parents=True, exist_ok=True)
+hashed = subprocess.run(["openssl", "passwd", "-6", "-stdin"], input=password + "\n",
+                        text=True, capture_output=True, check=True).stdout.strip()
+Path("/run/delayer/htpasswd").write_text(username + ":" + hashed + "\n")
+os.chmod("/run/delayer/htpasswd", 0o640)
+import grp
+os.chown("/run/delayer/htpasswd", 0, grp.getgrnam("www-data").gr_gid)
+unix_socket = os.environ.get("WEB_UNIX_SOCKET")
+if unix_socket and unix_socket != "/run/delayer-web/nginx.sock":
+    raise SystemExit("WEB_UNIX_SOCKET must be /run/delayer-web/nginx.sock")
+if unix_socket:
+    Path(unix_socket).parent.mkdir(parents=True, exist_ok=True)
+listen = "unix:" + unix_socket if unix_socket else str(port)
+template = Path("/opt/delayer/nginx.conf.template").read_text()
+Path("/etc/nginx/nginx.conf").write_text(template.replace("${WEB_LISTEN}", listen))
+subprocess.run(["nginx", "-t"], check=True)
+# Do not propagate the UI password to the worker processes.
+os.environ.pop("WEB_PASSWORD", None)
+os.execv("/usr/bin/python3", ["python3", "/opt/delayer/control.py"])

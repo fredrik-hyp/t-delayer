@@ -1,0 +1,33 @@
+# Linux multicast with an explicit Docker port mapping for the web interface.
+services:
+  database:
+    ports:
+      - '127.0.0.1:${DB_PORT:-55432}:5432'
+  delayer:
+    network_mode: host
+    ports: !reset []
+    environment:
+      PGHOST: 127.0.0.1
+      PGPORT: ${DB_PORT:-55432}
+      WEB_UNIX_SOCKET: /run/delayer-web/nginx.sock
+    volumes:
+      - web-socket:/run/delayer-web
+  web:
+    image: t-delayer:runtime
+    entrypoint: [nginx, -g, 'daemon off;']
+    volumes:
+      - ./docker-runtime/nginx.forward.conf:/etc/nginx/nginx.conf:ro
+      - web-socket:/run/delayer-web:ro
+    ports:
+      - '${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080'
+    depends_on:
+      delayer:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python3, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=5).read()']
+      interval: 15s
+      timeout: 8s
+      retries: 3
+    restart: unless-stopped
+volumes:
+  web-socket:

@@ -182,6 +182,39 @@ int find_time(char *name, uint32_t file_id, uint64_t searched_time, s_pause_arg 
 	pause->pause_file_id = file_id;
 	return 0;
 }
+/* The disk reader can prefetch more than one chunk ahead of the sender.
+ * Resolve the packet timestamp instead of adjusting its current file by one.
+ * Caller holds the pause mutex; this does not alter shared file metadata. */
+int find_time_in_buffer(char *name, uint32_t oldest_id, uint32_t newest_id,
+	uint64_t searched_time, s_pause_arg *pause)
+{
+	uint64_t low = oldest_id, high = newest_id;
+	s_file_info candidate;
+	while (low <= high && pstate != STATE_SHUTDOWN)
+	{
+		uint32_t id = (uint32_t)(low + (high - low) / 2);
+		memset(&candidate, 0, sizeof(candidate));
+		candidate.id = id;
+		int ret = taste_file(name, &candidate);
+		if (ret != 0)
+			return ret;
+		if (searched_time < candidate.start_time)
+		{
+			if (id == 0)
+				break;
+			high = id - 1;
+		}
+		else if (searched_time > candidate.end_time)
+			low = (uint64_t)id + 1;
+		else
+			return find_time(name, id, searched_time, pause);
+	}
+	/* A recording gap resolves to the next available packet. */
+	if (low <= newest_id)
+		return find_time(name, (uint32_t)low, searched_time, pause);
+	return 4;
+}
+
 // ret == 0 => Everything is ok
 // ret == 1 => Inparameters are NULL
 // ret == 2 => File doesnt exist - stat

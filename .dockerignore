@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+**/__pycache__
+**/*.pyc
+**/*.o
+build-artifacts
+pov-delayer2/tools/create_package
+pov-delayer2/.player-build
+pov-delayer2/delayer
+pov-delayer2/recorder
+pov-delayer2/player
+docker-runtime/instances.json

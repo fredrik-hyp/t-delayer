@@ -1,5 +1,4 @@
 """Run inside the test runtime container: actual nginx, DB, C workers and UDP."""
-import base64
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -14,24 +13,14 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get('TEST_BASEURL', 'http://127.0.0.1:8080')
-AUTH = 'Basic ' + base64.b64encode(('admin:' + os.environ['WEB_PASSWORD']).encode()).decode()
+from auth_client import Client
+
+client = Client()
 produced_times = {}
 
 
 def request(path, body=None, auth=True, control=True):
-    headers = {'Authorization': AUTH} if auth else {}
-    if body is not None:
-        headers['Content-Type'] = 'application/json'
-        if control:
-            headers['X-Delayer-Control'] = '1'
-    req = urllib.request.Request(BASE+path, data=json.dumps(body).encode() if body is not None else None, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=35) as response:
-            data = response.read()
-            return response.status, json.loads(data) if response.headers.get_content_type() == 'application/json' else data
-    except urllib.error.HTTPError as error:
-        return error.code, error.read()
+    return client.request(path,body,auth,control)
 
 
 def status(name='st1'):
@@ -100,6 +89,25 @@ for group in ['239.10.0.1','239.10.0.2']:
     threading.Thread(target=producer,args=(group,stop),daemon=True).start()
 try:
     assert request('/api/status',auth=False)[0] == 401
+    assert not client.last_headers.get('WWW-Authenticate')
+    code, page = request('/',auth=False)
+    assert code == 200 and b'login-form' in page
+    assert not client.last_headers.get('WWW-Authenticate')
+    assert request('/api/auth/session',auth=False)[1]['authenticated'] is False
+    assert request('/api/auth/login',{'username':'admin','password':'wrong'},auth=False)[0] == 401
+    assert request('/api/auth/login',{'username':'admin','password':os.environ['WEB_PASSWORD']},auth=False,control=False)[0] == 403
+    client.login()
+    cookie = client.last_headers.get('Set-Cookie')
+    assert cookie and 'HttpOnly' in cookie and 'SameSite=Strict' in cookie
+    assert request('/api/auth/session')[1]['authenticated'] is True
+    assert request('/api/status')[0] == 200
+    assert client.request('/api/auth/logout',{},headers={'Origin':'https://other.example'})[0] == 403
+    assert request('/api/auth/logout',{})[0] == 200
+    assert request('/api/status')[0] == 401
+    assert client.request('/api/status',auth=False,headers={'Cookie':cookie.split(';')[0]})[0] == 401
+    assert request('/api/instances/st1/start',{},auth=False)[0] == 401
+    client.login()
+    print('PASS integrated login, protected API, session restore, logout/revocation, cookie flags and origin checks',flush=True)
     assert request('/')[0] == 200
     assert request('/api/instances/st1/outputs/0/commands',{'action':'pause'},control=False)[0] == 403
     assert request('/api/instances/not-managed/start',{})[0] == 404
@@ -109,7 +117,7 @@ try:
     assert len(receivers[0].packets[-1][1]) == 1328
     assert len(receivers[1].packets[-1][1]) == 1316
     assert receivers[1].packets[-1][1][0] == 0x47
-    print('PASS nginx authentication, CSRF guard, two processes, 3 outputs, RTP/raw UDP',flush=True)
+    print('PASS session authentication, CSRF guard, two processes, 3 outputs, RTP/raw UDP',flush=True)
 
     # Let two chunks finish before exercising on-disk seeks.
     time.sleep(12)
@@ -242,6 +250,7 @@ try:
     assert request('/api/instances',dict(new_config,name='bad',outputs=[]))[0]==400
     Path('/tmp/expected-configuration.json').write_text(json.dumps({'st2':configuration,'st3':new_config}))
     print('PASS input edit, output removal, UI instance creation, duplicate/invalid configuration rejection',flush=True)
+    Path('/tmp/previous-session-cookie').write_text('; '.join(item.name+'='+item.value for item in client.jar))
 finally:
     stop.set()
     for receiver in receivers:

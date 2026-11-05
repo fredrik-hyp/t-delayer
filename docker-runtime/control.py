@@ -24,6 +24,7 @@ import time
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from web_auth import AuthError, Sessions
 
 LOG = logging.getLogger("delayer-control")
 SOCKET = "/run/delayer/control.sock"
@@ -393,12 +394,16 @@ class APIHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         LOG.info(fmt, *args)
 
-    def respond(self, status, data):
+    def respond(self, status, data, cookie=None):
         payload = json.dumps(data, default=json_value).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(payload)))
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
+        if status == 429:
+            self.send_header("Retry-After", "60")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -407,6 +412,21 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.handle_request(True)
+
+    def request_json(self):
+        if self.headers.get("X-Delayer-Control") != "1" or self.headers.get_content_type() != "application/json":
+            raise APIError(403, "JSON och X-Delayer-Control: 1 krävs")
+        origin = self.headers.get("Origin")
+        host = self.headers.get("Host", "")
+        if origin and origin not in ("http://" + host, "https://" + host):
+            raise APIError(403, "Begäran måste komma från webbgränssnittets egen adress")
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 0 < length <= 16384:
+            raise APIError(400, "Ogiltig requeststorlek")
+        body = json.loads(self.rfile.read(length))
+        if not isinstance(body, dict):
+            raise APIError(400, "Requesten måste vara ett JSON-objekt")
+        return body
 
     def handle_request(self, post):
         try:
@@ -419,6 +439,28 @@ class APIHandler(BaseHTTPRequestHandler):
                 healthy = manager.healthy()
                 self.respond(200 if healthy else 503, {"ok": healthy})
                 return
+            cookie = self.headers.get("Cookie", "")
+            authenticated = manager.auth.authenticated(cookie)
+            if not post and self.path == "/api/auth/session":
+                self.respond(200, {"authenticated": authenticated,
+                                   "username": manager.auth.username if authenticated else None})
+                return
+            if post and self.path == "/api/auth/login":
+                body = self.request_json()
+                if set(body) - {"username", "password"}:
+                    raise APIError(400, "Ange användarnamn och lösenord")
+                token = manager.auth.login(body.get("username"), body.get("password"),
+                                           self.headers.get("X-Real-IP", "local"))
+                manager.auth.revoke(cookie)
+                self.respond(200, {"authenticated": True, "username": manager.auth.username}, manager.auth.cookie(token))
+                return
+            if post and self.path == "/api/auth/logout":
+                self.request_json()
+                manager.auth.revoke(cookie)
+                self.respond(200, {"authenticated": False}, manager.auth.cookie())
+                return
+            if not authenticated:
+                raise APIError(401, "Logga in för att öppna kontrollrummet")
             if not post and self.path == "/api/status":
                 with database() as cur:
                     instances = [item.snapshot(cur) for item in manager.list_instances()]
@@ -428,14 +470,7 @@ class APIHandler(BaseHTTPRequestHandler):
             creating = self.path == "/api/instances"
             if not post or (not creating and (not match or match[1] not in manager.instances)):
                 raise APIError(404, "Resursen finns inte")
-            if self.headers.get("X-Delayer-Control") != "1" or self.headers.get_content_type() != "application/json":
-                raise APIError(403, "JSON och X-Delayer-Control: 1 krävs")
-            length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 16384:
-                raise APIError(400, "Ogiltig requeststorlek")
-            body = json.loads(self.rfile.read(length))
-            if not isinstance(body, dict):
-                raise APIError(400, "Requesten måste vara ett JSON-objekt")
+            body = self.request_json()
             if creating:
                 self.respond(201, manager.create_instance(body))
                 return
@@ -452,7 +487,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.respond(202, instance.command(int(match[3]), body))
         except (BrokenPipeError, ConnectionResetError):
             return
-        except APIError as error:
+        except (APIError, AuthError) as error:
             self.respond(error.status, {"error": error.message})
         except (ValueError, json.JSONDecodeError) as error:
             self.respond(400, {"error": str(error)})
@@ -478,6 +513,7 @@ class Manager:
         self.controller_id = os.environ.get("DELAYER_CONTROLLER_ID", "streams-" + fallback_id)
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", self.controller_id):
             raise ValueError("Invalid DELAYER_CONTROLLER_ID")
+        self.auth = Sessions.load(self.controller_id)
         self.owner = None
         self.nginx = None
         self.http = None

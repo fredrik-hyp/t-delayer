@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /run/delayerd /run/delayer /home/video
 COPY --from=build /src/pov-delayer2/delayer /usr/local/bin/delayer
 COPY --from=build /src/pov-delayer2/tools/read_chunk_file/read_chunk_file /usr/local/bin/read_chunk_file
-COPY docker-runtime/control.py docker-runtime/entrypoint.py /opt/delayer/
+COPY docker-runtime/control.py docker-runtime/entrypoint.py docker-runtime/web_auth.py /opt/delayer/
 COPY docker-runtime/nginx.conf.template /opt/delayer/
 COPY docker-runtime/web/ /opt/delayer/web/
 EXPOSE 8080

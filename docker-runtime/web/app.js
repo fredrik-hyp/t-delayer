@@ -1,6 +1,6 @@
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null};
+const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, authenticated: false, authGeneration: 0};
 const processLabels = {running: 'I drift', starting: 'Startar / väntar på status', stopped: 'Stoppad', exited: 'Processen avslutades'};
 const outputLabels = {Live: 'Live', Play: 'Fördröjd', Pause: 'Pausad'};
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -15,14 +15,106 @@ const localInput = value => {
 $('#timezone').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 async function api(path, body) {
-  const response = await fetch(new URL(path, window.location.origin), {cache: 'no-store', signal: AbortSignal.timeout(body ? 35000 : 10000),
+  const generation = state.authGeneration;
+  const response = await fetch(new URL(path, window.location.origin), {cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(body ? 35000 : 10000),
     ...(body ? {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Delayer-Control': '1'}, body: JSON.stringify(body)} : {})});
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
     try { message = (await response.json()).error || message; } catch (_) { /* nginx may return HTML */ }
+    if (response.status === 401 && path !== '/api/auth/login' && state.authenticated && generation === state.authGeneration) {
+      showLogin('Din session har gått ut. Logga in igen.');
+    }
     throw new Error(message);
   }
   return response.json();
+}
+function showLogin(message = '') {
+  state.authGeneration++;
+  state.authenticated = false;
+  state.connected = false;
+  state.instances = [];
+  state.busy.clear();
+  state.target = null;
+  state.editing = null;
+  for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+  $('#instances').replaceChildren();
+  $('#overview').replaceChildren();
+  $('#command-form').reset();
+  $('#configuration-form').reset();
+  $('#configuration-outputs').replaceChildren();
+  $('#notice').hidden = true;
+  $('#dashboard').hidden = true;
+  $('#dashboard-footer').hidden = true;
+  $('#user-menu').hidden = true;
+  $('#connection').hidden = true;
+  $('#session-user').textContent = '';
+  $('#login-view').hidden = false;
+  $('#login-password').value = '';
+  $('#login-password').type = 'password';
+  $('#password-visibility').textContent = 'Visa';
+  $('#password-visibility').setAttribute('aria-label','Visa lösenord');
+  $('#password-visibility').setAttribute('aria-pressed','false');
+  $('#login-error').textContent = message;
+  $('#login-submit').disabled = false;
+  $('#login-submit').textContent = 'Logga in';
+  document.body.classList.add('signed-out');
+}
+function signedIn(session) {
+  state.authGeneration++;
+  state.authenticated = true;
+  $('#login-password').value = '';
+  $('#login-view').hidden = true;
+  $('#dashboard').hidden = false;
+  $('#dashboard-footer').hidden = false;
+  $('#user-menu').hidden = false;
+  $('#connection').hidden = false;
+  $('#connection').textContent = 'Ansluter…';
+  $('#session-user').textContent = session.username;
+  document.body.classList.remove('signed-out','disconnected');
+}
+$('#password-visibility').addEventListener('click',() => {
+  const visible = $('#login-password').type === 'password';
+  $('#login-password').type = visible ? 'text' : 'password';
+  $('#password-visibility').textContent = visible ? 'Dölj' : 'Visa';
+  $('#password-visibility').setAttribute('aria-label',visible ? 'Dölj lösenord' : 'Visa lösenord');
+  $('#password-visibility').setAttribute('aria-pressed',String(visible));
+});
+$('#login-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if ($('#login-submit').disabled) return;
+  $('#login-submit').disabled = true;
+  $('#login-submit').textContent = 'Loggar in…';
+  $('#login-error').textContent = '';
+  try {
+    const session = await api('/api/auth/login',{username:$('#login-username').value.trim(),password:$('#login-password').value});
+    signedIn(session);
+    await refresh();
+  } catch (error) {
+    $('#login-error').textContent = error.message;
+    $('#login-password').value = '';
+    $('#login-password').focus();
+  } finally {
+    $('#login-submit').disabled = false;
+    $('#login-submit').textContent = 'Logga in';
+  }
+});
+$('#logout').addEventListener('click', async () => {
+  $('#logout').disabled = true;
+  try {
+    await api('/api/auth/logout',{});
+    showLogin();
+    $('#login-username').focus();
+  } catch (error) { notify(`Det gick inte att logga ut: ${error.message}`,true); }
+  finally { $('#logout').disabled = false; }
+});
+async function restoreSession() {
+  try {
+    const session = await api('/api/auth/session');
+    if (session.authenticated) {
+      signedIn(session);
+      await refresh();
+    } else showLogin();
+  } catch (_) { showLogin('Kunde inte nå tjänsten. Försök logga in igen.'); }
 }
 function notify(message, error = false) {
   $('#notice').hidden = false;
@@ -64,8 +156,11 @@ function render() {
   }
 }
 async function refresh() {
+  if (!state.authenticated) return;
+  const generation = state.authGeneration;
   try {
     const result = await api('/api/status');
+    if (!state.authenticated || generation !== state.authGeneration) return;
     state.instances = result.instances;
     state.connected = true;
     $('#add-instance').disabled = false;
@@ -74,6 +169,7 @@ async function refresh() {
     $('#connection').className = 'online';
     render();
   } catch (error) {
+    if (!state.authenticated || generation !== state.authGeneration) return;
     state.connected = false;
     $('#add-instance').disabled = true;
     document.body.classList.add('disconnected');
@@ -214,4 +310,5 @@ $('#configuration-form').addEventListener('submit', async event => {
   } catch (error) { $('#configuration-error').textContent = error.message; }
   finally { submit.disabled = false; }
 });
+restoreSession();
 (async function poll() { await refresh(); setTimeout(poll,2000); })();

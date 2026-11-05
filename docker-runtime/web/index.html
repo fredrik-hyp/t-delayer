@@ -7,14 +7,30 @@
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
-<body>
-  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Kontrollrum</span></div></div><div id="connection" role="status">Ansluter…</div></header>
-  <main>
+<body class="signed-out">
+  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Kontrollrum</span></div></div><div class="session-tools"><div id="connection" role="status" hidden>Ansluter…</div><div id="user-menu" hidden><span id="session-user"></span><button id="logout" type="button">Logga ut</button></div></div></header>
+  <main id="login-view" class="login-view">
+    <section class="login-card" aria-labelledby="login-title">
+      <p class="eyebrow">T-DELAYER / KONTROLLRUM</p>
+      <h1 id="login-title">Logga in</h1>
+      <p>Hantera dina strömmar, outputs och uppspelningar.</p>
+      <form id="login-form" action="/api/auth/login" method="post">
+        <label for="login-username">Användarnamn</label>
+        <input id="login-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required>
+        <label for="login-password">Lösenord</label>
+        <div class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="1024" required><button id="password-visibility" type="button" aria-label="Visa lösenord" aria-controls="login-password" aria-pressed="false">Visa</button></div>
+        <p id="login-error" class="form-error" role="alert" aria-live="polite"></p>
+        <button id="login-submit" class="primary" type="submit" disabled>Kontrollerar session…</button>
+      </form>
+      <noscript>Aktivera JavaScript för att använda kontrollrummet.</noscript>
+    </section>
+  </main>
+  <main id="dashboard" hidden>
     <div class="intro"><div><p class="eyebrow">MULTICAST / DRIFT</p><h1>Strömmar under kontroll.</h1><p>Live-status och individuell uppspelning för varje output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><button id="add-instance" class="primary" disabled>Ny instans</button></div></div>
     <div id="notice" role="status" aria-live="polite" hidden></div>
     <div id="instances"><p class="empty">Hämtar instanser…</p></div>
   </main>
-  <footer>Status hämtas varannan sekund. Tider visas i din lokala tidszon: <span id="timezone"></span>. Inspelning fortsätter när en output pausas.</footer>
+  <footer id="dashboard-footer" hidden>Status hämtas varannan sekund. Tider visas i din lokala tidszon: <span id="timezone"></span>. Inspelning fortsätter när en output pausas.</footer>
   <dialog id="command-dialog">
     <form id="command-form">
       <div class="dialog-heading"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Styr output</h2></div><button type="button" class="close" aria-label="Stäng">×</button></div>

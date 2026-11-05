@@ -42,12 +42,21 @@ nginx lyssna direkt på hostens `WEB_PORT`, utan en separat portforward. Docker 
 verifiera fysisk multicast på Linux innan drift. Se
 [Dockers dokumentation om host networking](https://docs.docker.com/engine/network/drivers/host/).
 
-Webbkontrollen använder Basic authentication. Använd HTTPS via din vanliga
-reverse proxy vid åtkomst över nätverk. `WEB_USERNAME` kan ändras och
-`WEB_PASSWORD_FILE` kan peka på en monterad Docker secret i stället för
-`WEB_PASSWORD`. API:t lyssnar enbart på en Unix-socket bakom nginx; även i host
-network-läge öppnas ingen extra API-port. Ingen CORS-policy öppnar API:t för andra
-webbplatser, och skrivningar kräver JSON och `X-Delayer-Control: 1`.
+Webbkontrollen har en integrerad inloggningssida och en knapp för utloggning.
+Användaren loggar in med `WEB_USERNAME` (standard `admin`) och `WEB_PASSWORD`.
+`WEB_PASSWORD_FILE` kan peka på en monterad Docker secret i stället. Lösenordet
+hashas vid start med PBKDF2; webbläsaren får en slumpad sessionscookie med
+`HttpOnly`, `SameSite=Strict` och åtta timmars giltighet. Utloggning återkallar
+sessionen direkt. Efter containeromstart behöver användaren logga in på nytt.
+Misslyckade inloggningsförsök begränsas per klientadress.
+
+Använd HTTPS via din vanliga reverse proxy vid åtkomst över nätverk. Sätt då
+`WEB_COOKIE_SECURE=1` så att sessionscookien bara skickas över HTTPS. API:t
+lyssnar enbart på en Unix-socket bakom nginx; även i host network-läge öppnas
+ingen extra API-port. Ingen CORS-policy öppnar API:t för andra webbplatser.
+Skrivningar kräver JSON och `X-Delayer-Control: 1`, och browseranrop måste ha
+samma origin som webbgränssnittet. API-fel returneras som JSON utan att utlösa
+webbläsarens inbyggda inloggningsruta.
 
 ## Konfiguration och flera instanser
 
@@ -126,11 +135,18 @@ okända outputs och styrning av stoppade/ej redo processer nekas.
 Exempel (använd HTTPS vid fjärrstyrning):
 
 ```sh
-curl -u "admin:$WEB_PASSWORD" http://localhost:8080/api/status
-curl -u "admin:$WEB_PASSWORD" \
+# Login uses the same JSON endpoint as the form; keep the cookie jar private.
+umask 077
+python3 -c 'import json,os; print(json.dumps({"username":os.environ.get("WEB_USERNAME","admin"),"password":os.environ["WEB_PASSWORD"]}))' | \
+  curl -c /tmp/delayer-cookies -H 'Content-Type: application/json' \
+  -H 'X-Delayer-Control: 1' --data-binary @- http://localhost:8080/api/auth/login
+curl -b /tmp/delayer-cookies http://localhost:8080/api/status
+curl -b /tmp/delayer-cookies \
   -H 'Content-Type: application/json' -H 'X-Delayer-Control: 1' \
   -d '{"action":"pause"}' \
   http://localhost:8080/api/instances/st1/outputs/1/commands
+curl -b /tmp/delayer-cookies -H 'Content-Type: application/json' \
+  -H 'X-Delayer-Control: 1' -d '{}' http://localhost:8080/api/auth/logout
 ```
 
 Konfiguration: `POST /api/instances` skapar en instans och
@@ -140,7 +156,10 @@ och `autostart`, samma fält som en komplett post i exempelfilen. Dubbla namn,
 kolliderande outputdestinationer och felaktiga inställningar nekas.
 
 Övriga endpoints: `POST /api/instances/{namn}/start`, `POST .../stop` med `{}`.
-Alla endpoints utom `/healthz` kräver nginx-inloggning. Ett processfel visas som
+`GET /api/auth/session` visar om en session finns; `POST /api/auth/login` och
+`POST /api/auth/logout` hanterar inloggning och utloggning. Övriga API-endpoints
+kräver en giltig session. HTML, CSS och JavaScript för inloggningsvyn samt
+`/healthz` är publika. HTTP Basic authentication används inte. Ett processfel visas som
 `exited` med exitkod och gör containern unhealthy; processen kan startas igen i
 UI:t. Oväntat processavslut startas inte automatiskt om i en loop. Docker
 `restart: unless-stopped` startar containern vid containeravslut. Efter avsiktlig
@@ -192,7 +211,7 @@ Integrationstestet skapar en egen stack och tar bort **sina egna** containrar oc
 volymer. Det kör två C-processer och tre multicastoutputs, kontrollerar RTP och
 raw UDP, paus/återupptagning per output, inspelad takt, jump, schemalagd start,
 wall-clock-stopp, täta kommandon, oförändrade PIDs, ID-skillnader mellan instans och
-konfiguration, autentisering, felaktig input, processstopp/start, dubbelt ägarskap,
+konfiguration, sessionsinloggning/utloggning och återkallade cookies, felaktig input, processstopp/start, dubbelt ägarskap,
 chunkanalys/export, inaktuell statistik, återhämtning efter processfel, UI-konfiguration av inputs/outputs, skapande av nya
 instanser och beständighet efter containeromstart. Fysisk NIC/multicast-routing måste testas
 på driftservern.

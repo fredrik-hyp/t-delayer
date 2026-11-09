@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, '/opt/delayer')
-from control import APIError, load_config, parse_time, validate_command, validate_configuration
+from control import APIError, load_config, parse_time, validate_command, validate_configuration, validate_import
 
 
 class ValidationTests(unittest.TestCase):
@@ -65,6 +65,23 @@ class ValidationTests(unittest.TestCase):
         value['instances'][0]['source']['host'] = '127.0.0.1'
         self.assertRaises(ValueError, load, value)
         self.assertEqual(load({'instances':[{'name':'existing'}]})[0]['name'], 'existing')
+
+    def test_import_accepts_single_or_collection_and_requires_complete_portable_settings(self):
+        item = {'name':'st1', 'source':{'host':'239.10.0.1','port':1234},
+                'outputs':[{'name':'Program','host':'239.20.0.1','port':1234,'ttl':7,'rawudp':True}]}
+        self.assertEqual(validate_import(item), validate_import({'instances':[item]}))
+        self.assertEqual(validate_import({'instances':[]}), [])
+        self.assertEqual(validate_import({'instances':[item]}, 'st1')[0]['name'], 'st1')
+        invalid = [[], None, {'instances':{}}, {'instances':[{'name':'st1'}]},
+                   {'instances':[item], 'extra':1}, {'instances':[item,item]},
+                   dict(item,source=dict(item['source'],command='sh')),
+                   dict(item,outputs=[dict(item['outputs'][0],id=42)]),
+                   dict(item,autostart=1), dict(item,msbuffer=0)]
+        for body in invalid:
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                validate_import(body)
+        for body in [item, {'instances':[]}, {'instances':[item,dict(item,name='st2',outputs=[{'host':'239.20.0.2','port':1234}])]}]:
+            self.assertRaises(ValueError, validate_import, body, 'st2')
 
 
 if __name__ == '__main__':

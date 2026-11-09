@@ -1,6 +1,6 @@
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, authenticated: false, authGeneration: 0};
+const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, importing: null, authenticated: false, authGeneration: 0};
 const processLabels = {running: 'Running', starting: 'Starting / waiting for status', stopped: 'Stopped', exited: 'Process exited'};
 const outputLabels = {Live: 'Live', Play: 'Delayed', Pause: 'Paused'};
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -103,6 +103,7 @@ function showLogin(message = '') {
   $('#command-form').reset();
   $('#configuration-form').reset();
   $('#password-form').reset();
+  $('#import-form').reset();
   $('#configuration-outputs').replaceChildren();
   $('#notice').hidden = true;
   $('#dashboard').hidden = true;
@@ -248,7 +249,7 @@ function render() {
   $('#instances').innerHTML = state.instances.map(instance => {
     const running = instance.pid !== null;
     const disabled = state.busy.has(instance.name) ? 'disabled' : '';
-    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Retention ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</div></div><div class="instance-buttons"><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></div>
+    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Retention ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</div></div><div class="instance-buttons"><button class="config-command" data-action="export" ${!state.connected ? 'disabled' : disabled}>Export JSON</button><button class="config-command" data-action="import" ${running || !state.connected ? 'disabled' : disabled} title="Stop the instance before importing">Import JSON</button><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></div>
       ${bufferSummary(instance)}
       <div class="table-scroll"><table><thead><tr><th>Output</th><th>Status</th><th>Recorded position / buffer</th><th>Traffic</th><th>Output controls</th></tr></thead><tbody>${instance.outputs.map(o => outputRow(instance,o)).join('')}</tbody></table></div>
       ${instance.pending.length ? `<div class="queue">Command queue: ${instance.pending.map(c => `#${c.id} ${escapeHTML(c.action)} → output ${c.pathnumber}`).join(' · ')}</div>` : ''}
@@ -270,6 +271,8 @@ async function refresh() {
     state.connected = true;
     renderSystem(result.system);
     $('#add-instance').disabled = false;
+    $('#export-all').disabled = false;
+    $('#import-all').disabled = false;
     document.body.classList.remove('disconnected');
     $('#connection').textContent = `● Connected · ${new Date(result.sampled_at).toISOString().slice(11, 19)} UTC`;
     $('#connection').className = 'online';
@@ -279,6 +282,8 @@ async function refresh() {
     state.connected = false;
     renderSystem(null, true);
     $('#add-instance').disabled = true;
+    $('#export-all').disabled = true;
+    $('#import-all').disabled = true;
     document.body.classList.add('disconnected');
     $('#connection').textContent = `Status unavailable · ${error.message}`;
     $('#connection').className = 'offline';
@@ -303,6 +308,14 @@ $('#instances').addEventListener('click', async event => {
   const name = button.closest('[data-instance]').dataset.instance;
   const action = button.dataset.action;
   const path = button.dataset.path == null ? null : Number(button.dataset.path);
+  if (action === 'export') {
+    try { await downloadConfiguration(name); } catch (error) { notify(error.message,true); }
+    return;
+  }
+  if (action === 'import') {
+    openImport(name);
+    return;
+  }
   if (action === 'configure') {
     openConfiguration(state.instances.find(instance => instance.name === name));
     return;
@@ -424,6 +437,88 @@ $('#configuration-form').addEventListener('submit', async event => {
     notify(`${body.name}: configuration saved. Start the instance when you are ready.`);
     await refresh();
   } catch (error) { $('#configuration-error').textContent = error.message; }
+  finally { submit.disabled = false; }
+});
+async function downloadConfiguration(name = null) {
+  const generation = state.authGeneration;
+  const data = await api(name ? `/api/instances/${name}/configuration` : '/api/configuration');
+  if (!state.authenticated || generation !== state.authGeneration) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data,null,2) + '\n'], {type:'application/json'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name ? `${name}.json` : 'instances.json';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url),1000);
+}
+function openImport(name = null) {
+  state.importing = name;
+  $('#import-form').reset();
+  $('#import-title').textContent = name ? `Import ${name}` : 'Import JSON';
+  $('#import-help').textContent = name
+    ? `Load one complete instance object with name "${name}" (or an instances object containing only that instance).`
+    : 'Load one complete instance object or an object containing an "instances" list, as produced by Export all JSON.';
+  $('#import-preview').textContent = '';
+  $('#import-error').textContent = '';
+  $('#import-dialog').showModal();
+}
+function importBody() {
+  const text = $('#import-json').value;
+  if (new Blob([text]).size > 1024 * 1024) throw new Error('JSON must be at most 1 MiB.');
+  const body = JSON.parse(text);
+  if (!body || Array.isArray(body) || typeof body !== 'object') throw new Error('Use a JSON object.');
+  const items = Object.hasOwn(body,'instances') ? body.instances : [body];
+  if (!Array.isArray(items) || items.some(item => !item || typeof item !== 'object' || Array.isArray(item) || typeof item.name !== 'string' || !item.source || !Array.isArray(item.outputs))) {
+    throw new Error('Each instance needs a name, source and outputs.');
+  }
+  if (state.importing && (items.length !== 1 || items[0].name !== state.importing)) {
+    throw new Error(`Import exactly one configuration with name ${state.importing}.`);
+  }
+  return {body,items};
+}
+function previewImport() {
+  $('#import-error').textContent = '';
+  $('#import-preview').textContent = '';
+  if (!$('#import-json').value.trim()) return;
+  try {
+    const {items} = importBody();
+    const existing = items.filter(item => state.instances.some(instance => instance.name === item.name));
+    const running = existing.filter(item => state.instances.some(instance => instance.name === item.name && instance.pid !== null));
+    $('#import-preview').textContent = `${items.length - existing.length} new, ${existing.length} updated.${existing.length ? ` Update: ${existing.map(item => item.name).join(', ')}.` : ''}${running.length ? ` Stop first: ${running.map(item => item.name).join(', ')}.` : ''}`;
+  } catch (error) { $('#import-error').textContent = error.message; }
+}
+$('#export-all').addEventListener('click',async () => {
+  try { await downloadConfiguration(); } catch (error) { notify(error.message,true); }
+});
+$('#import-all').addEventListener('click',() => openImport());
+$('#import-json').addEventListener('input',previewImport);
+$('#import-file').addEventListener('change',async event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const generation = state.authGeneration;
+  try {
+    if (file.size > 1024 * 1024) throw new Error('JSON must be at most 1 MiB.');
+    const text = await file.text();
+    if (!state.authenticated || generation !== state.authGeneration || !$('#import-dialog').open) return;
+    $('#import-json').value = text.replace(/^\uFEFF/,'');
+    previewImport();
+  } catch (error) { $('#import-error').textContent = error.message; }
+});
+for (const button of document.querySelectorAll('[data-close-import]')) button.addEventListener('click',() => $('#import-dialog').close());
+$('#import-form').addEventListener('submit',async event => {
+  event.preventDefault();
+  const submit = $('button[type=submit]',event.target);
+  if (submit.disabled) return;
+  submit.disabled = true;
+  $('#import-error').textContent = '';
+  try {
+    const {body} = importBody();
+    const result = await api(state.importing ? `/api/instances/${state.importing}/configuration/import` : '/api/configuration/import',body);
+    $('#import-dialog').close();
+    notify(`Configuration imported for ${result.imported.length} instance(s). Start instances when ready.`);
+    await refresh();
+  } catch (error) { $('#import-error').textContent = error.message; }
   finally { submit.disabled = false; }
 });
 restoreSession();

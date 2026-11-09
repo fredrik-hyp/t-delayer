@@ -26,7 +26,7 @@
     </section>
   </main>
   <main id="dashboard" hidden>
-    <div class="intro"><div><p class="eyebrow">MULTICAST / OPERATIONS</p><h1>Streams under control.</h1><p>Live status and independent playback for every output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><button id="add-instance" class="primary" disabled>New instance</button></div></div>
+    <div class="intro"><div><p class="eyebrow">MULTICAST / OPERATIONS</p><h1>Streams under control.</h1><p>Live status and independent playback for every output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><div class="actions"><button id="export-all" disabled>Export all JSON</button><button id="import-all" disabled>Import JSON</button><button id="add-instance" class="primary" disabled>New instance</button></div></div></div>
     <section class="system-panel" aria-label="System resources">
       <div class="system-heading"><span>System resources</span><span id="system-status" role="status">Waiting for status…</span></div>
       <dl class="system-metrics">
@@ -92,6 +92,20 @@
       <div id="configuration-outputs"></div>
       <p class="form-error" id="configuration-error" role="alert"></p>
       <div class="dialog-actions"><button type="button" data-close-config>Cancel</button><button type="submit" class="primary">Save configuration</button></div>
+    </form>
+  </dialog>
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form id="import-form">
+      <div class="dialog-heading"><div><p class="eyebrow">CONFIGURATION</p><h2 id="import-title">Import JSON</h2></div><button type="button" data-close-import class="close" aria-label="Close import">×</button></div>
+      <p id="import-help"></p>
+      <p>Existing instances with the same name will be updated and must be stopped. Other instances are kept. Importing does not start any processes; autostart applies at the next container start.</p>
+      <label for="import-file">Load JSON file (up to 1 MiB)</label>
+      <input id="import-file" type="file" accept=".json,application/json">
+      <label for="import-json">JSON object</label>
+      <textarea id="import-json" rows="14" required spellcheck="false" aria-describedby="import-help import-preview"></textarea>
+      <p id="import-preview" aria-live="polite"></p>
+      <p class="form-error" id="import-error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" data-close-import>Cancel</button><button type="submit" class="primary">Import configuration</button></div>
     </form>
   </dialog>
 </body>

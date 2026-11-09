@@ -90,6 +90,43 @@ UI-inställningar sparas i PostgreSQL, inklusive medlemskap i containern och
 autostart, och återläses efter containeromstart. JSON-filen är en bootstrapfil;
 redan sparade UI-inställningar skrivs inte över av den.
 
+### Export och import av JSON
+
+Välj **Export JSON** på en instans eller **Export all JSON** ovanför listan för
+att ladda ned konfigurationen. En enskild instans exporteras som ett JSON-objekt
+med `name`, `autostart`, `msbuffer`, `source` och `outputs`. Export av alla
+instanser ger `{"instances":[...]}`, samma format som bootstrapfilen.
+Databas-ID:n, processinformation, lösenord, inspelningar och uppspelningsläge
+ingår inte. Export fungerar även medan instanser körs.
+
+Välj **Import JSON** ovanför listan för en eller flera instanser, eller på en
+stoppad instans för just den instansen. Ladda en JSON-fil eller klistra in ett
+JSON-objekt (högst 1 MiB). Dialogen visar vilka namn som uppdateras och hur många
+nya instanser som skapas. Vid import på en enskild instans måste objektet ha
+samma namn; ett `instances`-objekt med enbart den instansen accepteras också.
+
+Import skapar saknade instanser och ersätter konfigurationen för befintliga
+instanser med samma namn. Instanser som inte finns i importen behålls. Alla
+berörda befintliga instanser måste vara stoppade. Hela importen valideras och
+sparas i en databastransaktion; felaktiga fält, dubbla namn, outputkollisioner
+eller upptagna namn gör att inget sparas. Namn som ägs av en annan container
+kan inte importeras. Processer startas inte av importen, även om `autostart`
+är `true`; det värdet används vid nästa containerstart. Sparade inställningar
+återläses efter omstart precis som inställningar skapade i formuläret.
+
+API:t har samma sessions- och origin-skydd som övrig webbkontroll:
+
+| Åtgärd | Endpoint | JSON |
+| --- | --- | --- |
+| Exportera alla | `GET /api/configuration` | Returnerar `{"instances":[...]}` |
+| Exportera en | `GET /api/instances/{namn}/configuration` | Returnerar ett instansobjekt |
+| Importera en eller flera | `POST /api/configuration/import` | Instansobjekt eller `{"instances":[...]}` |
+| Importera till en instans | `POST /api/instances/{namn}/configuration/import` | Exakt en instans med samma namn |
+
+POST kräver `Content-Type: application/json` och `X-Delayer-Control: 1`.
+Lyckad import ger `200` och `{"saved":true,"imported":["st1","st2"]}`.
+En tom `instances`-lista är tillåten och ändrar ingenting.
+
 Exempelfilen innehåller `st1` med två outputs och `st2` med en output. `autostart`
 styr om respektive process startar när containern startar. En stoppad instans kan
 startas från UI:t. Instansstopp stoppar både inspelning och alla dess outputs;
@@ -244,3 +281,7 @@ konfiguration, sessionsinloggning/utloggning och återkallade cookies, felaktig 
 chunkanalys/export, inaktuell statistik, återhämtning efter processfel, UI-konfiguration av inputs/outputs, skapande av nya
 instanser och beständighet efter containeromstart. Fysisk NIC/multicast-routing måste testas
 på driftservern.
+Testet täcker även JSON-export/import per instans och för flera instanser,
+återimport av exporterad konfiguration, atomisk rollback vid databasfel,
+ägarlås, outputkollisioner, importer över 16 KiB samt importens beständighet
+och att inga processer startas av import.

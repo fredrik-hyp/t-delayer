@@ -46,6 +46,7 @@ with tempfile.TemporaryDirectory(prefix='delayer-test-') as temporary:
         print('PASS invalid and unavailable multicast interfaces rejected at startup')
         compose('exec','-T','delayer','python3','-m','unittest','discover','-s','/tests','-p','test_*.py','-v')
         compose('exec','-T','delayer','python3','/tests/integration.py')
+        compose('exec','-T','delayer','python3','/tests/configuration_transfer.py')
         compose('exec','-T','delayer','python3','/tests/password_change.py','change')
         # A second runtime against the same streams must fail ownership acquisition.
         network = project+'_default'

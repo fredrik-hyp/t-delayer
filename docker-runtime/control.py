@@ -3,7 +3,7 @@
 Commands use the existing delayercoms / SIGUSR1 protocol. Never spawn a process
 from a request-supplied command or PID, and never run multiple API workers.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from datetime import datetime, timezone
 import grp
 import hashlib
@@ -30,6 +30,7 @@ from system_metrics import SystemMetrics
 LOG = logging.getLogger("delayer-control")
 SOCKET = "/run/delayer/control.sock"
 STATES = {"Live", "Play", "Pause"}
+IMPORT_MAX_BYTES = 1024 * 1024
 
 
 class APIError(Exception):
@@ -110,7 +111,38 @@ def validate_configuration(body):
         raise ValueError("Unknown configuration fields")
     if "source" not in body or "outputs" not in body:
         raise ValueError("An input and at least one output are required")
+    if not isinstance(body["source"], dict) or set(body["source"]) - {"host", "port"}:
+        raise ValueError("Unknown input fields; use host and port")
+    if isinstance(body["outputs"], list):
+        for output in body["outputs"]:
+            if not isinstance(output, dict) or set(output) - {"name", "host", "port", "ttl", "rawudp"}:
+                raise ValueError("Unknown output fields")
     return validate_instances([dict(body, autostart=body.get("autostart", False))])[0]
+
+
+def validate_import(body, name=None):
+    """Accept one complete instance or the bootstrap-compatible collection object."""
+    if not isinstance(body, dict):
+        raise ValueError("The configuration must be a JSON object")
+    if "instances" in body:
+        if set(body) != {"instances"} or not isinstance(body["instances"], list):
+            raise ValueError("Use an object containing an instances list")
+        items = [validate_configuration(item) for item in body["instances"]]
+    else:
+        items = [validate_configuration(body)]
+    validate_instances(items)
+    if name is not None and (len(items) != 1 or items[0]["name"] != name):
+        raise ValueError(f"Import exactly one configuration with name {name}")
+    return items
+
+
+def export_configuration(instance, runtime):
+    """Portable settings only: omit database IDs, status and process metadata."""
+    return {"name": instance.name, "autostart": instance.config.get("autostart", False),
+            "msbuffer": runtime["msbuffer"],
+            "source": {key: runtime["source"][key] for key in ("host", "port")},
+            "outputs": [{key: output[key] for key in ("name", "host", "port", "ttl", "rawudp")}
+                        for output in runtime["outputs"]]}
 
 
 def provision(items):
@@ -414,7 +446,7 @@ class APIHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.handle_request(True)
 
-    def request_json(self):
+    def request_json(self, max_bytes=16384):
         if self.headers.get("X-Delayer-Control") != "1" or self.headers.get_content_type() != "application/json":
             raise APIError(403, "JSON and X-Delayer-Control: 1 are required")
         origin = self.headers.get("Origin")
@@ -422,7 +454,7 @@ class APIHandler(BaseHTTPRequestHandler):
         if origin and origin not in ("http://" + host, "https://" + host):
             raise APIError(403, "The request must come from the web interface origin")
         length = int(self.headers.get("Content-Length", "0"))
-        if not 0 < length <= 16384:
+        if not 0 < length <= max_bytes:
             raise APIError(400, "Invalid request size")
         body = json.loads(self.rfile.read(length))
         if not isinstance(body, dict):
@@ -479,7 +511,19 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.respond(200, {"sampled_at": datetime.now(timezone.utc), "instances": instances,
                                    "system": metrics})
                 return
-            match = re.fullmatch(r"/api/instances/([A-Za-z0-9_.-]+)/(start|stop|configuration|outputs/(\d+)/commands)", self.path)
+            if self.path == "/api/configuration" and not post:
+                self.respond(200, manager.export_configurations())
+                return
+            if self.path == "/api/configuration/import" and post:
+                self.respond(200, manager.import_configurations(self.request_json(IMPORT_MAX_BYTES)))
+                return
+            match = re.fullmatch(r"/api/instances/([A-Za-z0-9_.-]+)/(start|stop|configuration(?:/import)?|outputs/(\d+)/commands)", self.path)
+            if match and not post and match[2] == "configuration":
+                self.respond(200, manager.export_configurations(match[1]))
+                return
+            if match and post and match[2] == "configuration/import":
+                self.respond(200, manager.import_configurations(self.request_json(IMPORT_MAX_BYTES), match[1]))
+                return
             creating = self.path == "/api/instances"
             if not post or (not creating and (not match or match[1] not in manager.instances)):
                 raise APIError(404, "Resource does not exist")
@@ -536,6 +580,77 @@ class Manager:
     def list_instances(self):
         with self.lock:
             return list(self.instances.values())
+
+    def export_configurations(self, name=None):
+        with self.lock, ExitStack() as stack:
+            if name is not None and name not in self.instances:
+                raise APIError(404, "Resource does not exist")
+            instances = [self.instances[name]] if name is not None else list(self.instances.values())
+            for instance in instances:
+                stack.enter_context(instance.lock)
+            with database() as cur:
+                items = [export_configuration(instance, read_instance(cur, instance.name)) for instance in instances]
+            return items[0] if name is not None else {"instances": items}
+
+    def import_configurations(self, body, name=None):
+        items = validate_import(body, name)
+        names = {item["name"] for item in items}
+        with self.lock, ExitStack() as stack:
+            if name is not None and name not in self.instances:
+                raise APIError(404, "Resource does not exist")
+            for instance_name in sorted(names & self.instances.keys()):
+                instance = self.instances[instance_name]
+                stack.enter_context(instance.lock)
+                if instance.process and instance.process.poll() is None:
+                    raise APIError(409, f"Stop {instance_name} before importing its configuration")
+            # Check the final destination set, allowing outputs to move between
+            # stopped instances in the same transaction.
+            occupied = {(output["host"], output["port"])
+                        for instance in self.instances.values() if instance.name not in names
+                        for output in instance.runtime["outputs"]}
+            if any((output["host"], output["port"]) in occupied for item in items for output in item["outputs"]):
+                raise APIError(409, "Another instance already uses this output address and port")
+            claimed, refreshed = [], {}
+            try:
+                with self.owner_lock, self.owner.cursor() as cur:
+                    for instance_name in sorted(names - self.instances.keys()):
+                        cur.execute("SELECT pg_try_advisory_lock(hashtextextended(%s,0))", ("delayer:" + instance_name,))
+                        if not cur.fetchone()[0]:
+                            raise APIError(409, f"{instance_name} is already owned by another container")
+                        claimed.append(instance_name)
+                with database() as cur:
+                    for item in items:
+                        instance_name = item["name"]
+                        if instance_name in self.instances:
+                            runtime = read_instance(cur, instance_name)
+                            update_configuration(cur, runtime, item)
+                            cur.execute("""UPDATE delayerwebinstances SET autostart=%s
+                                WHERE streaminterface_id=%s AND controller_id=%s""",
+                                        (item["autostart"], runtime["id"], self.controller_id))
+                        else:
+                            cur.execute("SELECT id FROM streaminterfaces WHERE name=%s", (instance_name,))
+                            if cur.fetchone():
+                                raise APIError(409, f"{instance_name} already exists in the database")
+                            insert_configuration(cur, item)
+                            runtime = read_instance(cur, instance_name)
+                            cur.execute("""INSERT INTO delayerwebinstances (streaminterface_id,controller_id,autostart)
+                                VALUES (%s,%s,%s)""", (runtime["id"], self.controller_id, item["autostart"]))
+                        refreshed[instance_name] = read_instance(cur, instance_name)
+            except Exception:
+                with self.owner_lock, self.owner.cursor() as cur:
+                    for instance_name in reversed(claimed):
+                        cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", ("delayer:" + instance_name,))
+                raise
+            # Publish only after all writes commit; importing never starts workers.
+            for item in items:
+                instance = self.instances.get(item["name"])
+                if instance is None:
+                    instance = Instance(item)
+                    self.instances[item["name"]] = instance
+                instance.config = item
+                instance.runtime = refreshed[item["name"]]
+            LOG.info("Imported configuration for %s", ", ".join(sorted(names)))
+            return {"saved": True, "imported": [item["name"] for item in items]}
 
     def check_destinations(self, item):
         occupied = {(output["host"], output["port"])

@@ -29,6 +29,7 @@ services:
       WEB_COOKIE_SECURE: ${WEB_COOKIE_SECURE:-0}
       WEB_PORT: "8080"
       DELAYER_CONTROLLER_ID: ${DELAYER_CONTROLLER_ID:-delayer}
+      DELAYER_MULTICAST_INTERFACE: ${DELAYER_MULTICAST_INTERFACE:-}
       TZ: UTC
     volumes:
       - ${DELAYER_INSTANCES_FILE:-./docker-runtime/instances.json}:/etc/delayer/instances.json:ro

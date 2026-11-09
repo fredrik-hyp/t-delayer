@@ -42,7 +42,7 @@ s_interface streaminterface;
 // shared with delayer_other.c
 char video_path[VIDEO_PATH_LEN];
 
-// ===== Global variabel in this file =====
+// ===== Global variables in this file =====
 char	pidfilename[MAX_PID_FILENAME];
 int	pidfd;
 
@@ -1622,13 +1622,13 @@ int main(int argc, char **argv)
 #if 0
 				if (delayercom[0].startplayat_timestamp == 0)
 				{
-					fprintf(stderr, "2.1.1) Om startplayat är NULL pausa, play skickas enligt 3 nedan\n");
-					// 2.1.1) Om startplayat är NULL pausa, play skickas enligt 3 nedan
+					fprintf(stderr, "2.1.1) If startplayat is NULL, pause; play is sent as described in step 3 below\n");
+					// 2.1.1) If startplayat is NULL, pause; play is sent as described in step 3 below
 				}
 				else if (delayercom[0].playto_timestamp < delayercom[0].startplayat_timestamp)
 				{
-					fprintf(stderr, "2.1.3_a) Om playto är satt innan startplayat spela upp i all framtid\n");
-					// 2.1.3_a) Om playto är satt innan startplayat spela upp i all framtid
+					fprintf(stderr, "2.1.3_a) If playto is before startplayat, play indefinitely\n");
+					// 2.1.3_a) If playto is before startplayat, play indefinitely
 				}
 #endif
 				}

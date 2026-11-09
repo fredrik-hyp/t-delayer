@@ -61,17 +61,17 @@ class Sessions:
             while attempts and attempts[0] <= now - 60:
                 attempts.popleft()
             if len(attempts) >= 8:
-                raise AuthError(429, 'För många inloggningsförsök. Vänta en minut och försök igen.')
+                raise AuthError(429, 'Too many sign-in attempts. Wait a minute and try again.')
             attempts.append(now)
         if not isinstance(username, str) or not isinstance(password, str) or len(username) > 64 or len(password) > 1024:
-            raise AuthError(401, 'Fel användarnamn eller lösenord.')
+            raise AuthError(401, 'Incorrect username or password.')
         try:
             given = hashlib.pbkdf2_hmac('sha256', password.encode(), self.salt, self.iterations)
             valid_name = hmac.compare_digest(username.encode(), self.username.encode())
         except UnicodeError:
-            raise AuthError(401, 'Fel användarnamn eller lösenord.')
+            raise AuthError(401, 'Incorrect username or password.')
         if not hmac.compare_digest(given, self.digest) or not valid_name:
-            raise AuthError(401, 'Fel användarnamn eller lösenord.')
+            raise AuthError(401, 'Incorrect username or password.')
         token = secrets.token_urlsafe(32)
         with self.lock:
             self._prune()

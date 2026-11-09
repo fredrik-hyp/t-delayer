@@ -35,12 +35,29 @@ extern s_interface streaminterface;
 // delayer_main.c
 extern char video_path[VIDEO_PATH_LEN];
 
-// ===== Global variabel in this file =====
+// ===== Global variables in this file =====
 extern pthread_mutex_t mutex_disc_signal;
 //extern pthread_cond_t condt_disc_signal;
 
 // To communicate between multicast and rudp / talkback thread
 extern sem_t semaphore;
+
+static int multicast_interface_address(struct in_addr *address)
+{
+	const char *configured = getenv("DELAYER_MULTICAST_INTERFACE");
+	address->s_addr = htonl(INADDR_ANY);
+	if (configured == NULL || configured[0] == '\0')
+		return 0;
+	if (inet_pton(AF_INET, configured, address) != 1 ||
+		address->s_addr == htonl(INADDR_ANY) ||
+		address->s_addr == htonl(INADDR_BROADCAST) ||
+		IN_MULTICAST(ntohl(address->s_addr)))
+	{
+		LOGMSG(LOG_ERR, "%s", "DELAYER_MULTICAST_INTERFACE must be a local unicast IPv4 address");
+		return -1;
+	}
+	return 0;
+}
 
 
 int find_time(char *name, uint32_t file_id, uint64_t searched_time, s_pause_arg *pause)
@@ -602,10 +619,16 @@ void *thread_mc_receiver(void *arg)
 	struct sockaddr_in sockaddr_mc_input;
 	socklen_t addrlen;
 	struct ip_mreq mreq;
+	struct in_addr multicast_interface;
 	bufferelement *current_bufelement=NULL;
 	uint32_t current_packet_counter = 1;
 	uint32_t dropped;
 	ssize_t recv_bytes=0;
+	if (multicast_interface_address(&multicast_interface) != 0)
+	{
+		pstate = STATE_SHUTDOWN;
+		return NULL;
+	}
 
 #if 1
 	fd_set fdset;
@@ -711,13 +734,35 @@ void *thread_mc_receiver(void *arg)
 		syslog(LOG_NOTICE, "%s: binding input done",
 			streaminterface.name);
 		mreq.imr_multiaddr.s_addr = inet_addr(mc_receiver_arg->multicast_address);
-		mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+		mreq.imr_interface = multicast_interface;
+		if (multicast_interface.s_addr != htonl(INADDR_ANY))
+		{
+#ifdef IP_MULTICAST_ALL
+			// Receive only memberships joined by this socket on the selected interface.
+			optval = 0;
+			if (setsockopt(fd_mc_input, IPPROTO_IP, IP_MULTICAST_ALL, &optval, sizeof(optval)) == -1)
+			{
+				LOGMSG(LOG_ERR, "%s: cannot restrict multicast input: %s", streaminterface.name, strerror(errno));
+				close(fd_mc_input);
+				pstate = STATE_SHUTDOWN;
+				return NULL;
+			}
+#endif
+			LOGMSG(LOG_NOTICE, "%s: multicast input interface %s", streaminterface.name, getenv("DELAYER_MULTICAST_INTERFACE"));
+		}
 
 		syslog(LOG_NOTICE, "%s: adding membership",
 			streaminterface.name);
 
 		if (setsockopt(fd_mc_input, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == -1)
 		{
+			if (multicast_interface.s_addr != htonl(INADDR_ANY) && IN_MULTICAST(ntohl(mreq.imr_multiaddr.s_addr)))
+			{
+				LOGMSG(LOG_ERR, "%s: cannot join multicast on selected interface: %s", streaminterface.name, strerror(errno));
+				close(fd_mc_input);
+				pstate = STATE_SHUTDOWN;
+				return NULL;
+			}
 			LOGMSG(LOG_WARNING, "%s: Probably unicast - setsockopt failed errno: %d %s",
 				streaminterface.name, errno, strerror(errno));
 		}
@@ -2070,6 +2115,12 @@ void *thread_mc_sender(void *arg)
 	ssize_t sent_bytes;
 	uint64_t total_sent_bytes = 0;
 	int fd_mc_output;
+	struct in_addr multicast_interface;
+	if (multicast_interface_address(&multicast_interface) != 0)
+	{
+		pstate = STATE_SHUTDOWN;
+		return NULL;
+	}
 
 	uint64_t sleeptime = 10000;
 	uint64_t diff = 0;
@@ -2133,6 +2184,18 @@ void *thread_mc_sender(void *arg)
 	sockaddr_mc_output.sin_addr.s_addr=inet_addr(sender_arg->multicast_address);
 	sockaddr_mc_output.sin_port=htons(sender_arg->multicast_port);
 	
+	if (multicast_interface.s_addr != htonl(INADDR_ANY))
+	{
+		if (setsockopt(fd_mc_output, IPPROTO_IP, IP_MULTICAST_IF, &multicast_interface, sizeof(multicast_interface)) == -1)
+		{
+			LOGMSG(LOG_ERR, "%s: cannot select multicast output interface: %s", interfacename, strerror(errno));
+			close(fd_mc_output);
+			pstate = STATE_SHUTDOWN;
+			return NULL;
+		}
+		LOGMSG(LOG_NOTICE, "%s: multicast output interface %s", interfacename, getenv("DELAYER_MULTICAST_INTERFACE"));
+	}
+
 	// set TTL
 	if (setsockopt(fd_mc_output, IPPROTO_IP, IP_MULTICAST_TTL, (void *) &sender_arg->multicast_ttl,  sizeof(sender_arg->multicast_ttl)) == -1)
 	{

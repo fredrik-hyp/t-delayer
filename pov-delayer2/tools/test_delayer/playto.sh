@@ -21,8 +21,8 @@ if [ ! -z "$SELECT" ]; then
 	exit
 fi
 
-echo "5) Kommer action playto läses playto columnen in på nytt från"
-echo "delayarcoms och uppdateras"
+echo "5) When the playto action arrives, reread the playto column from"
+echo "delayercoms and update it"
 
 su - postgres -c "psql delayerdb -c \"INSERT INTO delayercoms (streaminterface_id, pathnumber, action, jumptopos, startplayat, playto) VALUES ('$interface', '$pathnumber', 'playto', NULL, NULL, now()+(10 || 'second')::interval);\""
 

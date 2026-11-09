@@ -1,10 +1,10 @@
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
 const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, authenticated: false, authGeneration: 0};
-const processLabels = {running: 'I drift', starting: 'Startar / väntar på status', stopped: 'Stoppad', exited: 'Processen avslutades'};
-const outputLabels = {Live: 'Live', Play: 'Fördröjd', Pause: 'Pausad'};
+const processLabels = {running: 'Running', starting: 'Starting / waiting for status', stopped: 'Stopped', exited: 'Process exited'};
+const outputLabels = {Live: 'Live', Play: 'Delayed', Pause: 'Paused'};
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const timeText = value => value ? new Date(value).toLocaleString('sv-SE') : '—';
+const timeText = value => value ? new Date(value).toLocaleString('en-GB') : '—';
 const bps = value => value == null ? '—' : `${(Number(value) / 1000000).toFixed(2)} Mbit/s`;
 const duration = value => value == null ? '—' : `${Number(value).toFixed(1)} s`;
 const localInput = value => {
@@ -22,7 +22,7 @@ async function api(path, body) {
     let message = `HTTP ${response.status}`;
     try { message = (await response.json()).error || message; } catch (_) { /* nginx may return HTML */ }
     if (response.status === 401 && path !== '/api/auth/login' && state.authenticated && generation === state.authGeneration) {
-      showLogin('Din session har gått ut. Logga in igen.');
+      showLogin('Your session has expired. Sign in again.');
     }
     throw new Error(message);
   }
@@ -51,12 +51,12 @@ function showLogin(message = '') {
   $('#login-view').hidden = false;
   $('#login-password').value = '';
   $('#login-password').type = 'password';
-  $('#password-visibility').textContent = 'Visa';
-  $('#password-visibility').setAttribute('aria-label','Visa lösenord');
+  $('#password-visibility').textContent = 'Show';
+  $('#password-visibility').setAttribute('aria-label','Show password');
   $('#password-visibility').setAttribute('aria-pressed','false');
   $('#login-error').textContent = message;
   $('#login-submit').disabled = false;
-  $('#login-submit').textContent = 'Logga in';
+  $('#login-submit').textContent = 'Sign in';
   document.body.classList.add('signed-out');
 }
 function signedIn(session) {
@@ -68,22 +68,22 @@ function signedIn(session) {
   $('#dashboard-footer').hidden = false;
   $('#user-menu').hidden = false;
   $('#connection').hidden = false;
-  $('#connection').textContent = 'Ansluter…';
+  $('#connection').textContent = 'Connecting…';
   $('#session-user').textContent = session.username;
   document.body.classList.remove('signed-out','disconnected');
 }
 $('#password-visibility').addEventListener('click',() => {
   const visible = $('#login-password').type === 'password';
   $('#login-password').type = visible ? 'text' : 'password';
-  $('#password-visibility').textContent = visible ? 'Dölj' : 'Visa';
-  $('#password-visibility').setAttribute('aria-label',visible ? 'Dölj lösenord' : 'Visa lösenord');
+  $('#password-visibility').textContent = visible ? 'Hide' : 'Show';
+  $('#password-visibility').setAttribute('aria-label',visible ? 'Hide password' : 'Show password');
   $('#password-visibility').setAttribute('aria-pressed',String(visible));
 });
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault();
   if ($('#login-submit').disabled) return;
   $('#login-submit').disabled = true;
-  $('#login-submit').textContent = 'Loggar in…';
+  $('#login-submit').textContent = 'Signing in…';
   $('#login-error').textContent = '';
   try {
     const session = await api('/api/auth/login',{username:$('#login-username').value.trim(),password:$('#login-password').value});
@@ -95,7 +95,7 @@ $('#login-form').addEventListener('submit', async event => {
     $('#login-password').focus();
   } finally {
     $('#login-submit').disabled = false;
-    $('#login-submit').textContent = 'Logga in';
+    $('#login-submit').textContent = 'Sign in';
   }
 });
 $('#logout').addEventListener('click', async () => {
@@ -104,7 +104,7 @@ $('#logout').addEventListener('click', async () => {
     await api('/api/auth/logout',{});
     showLogin();
     $('#login-username').focus();
-  } catch (error) { notify(`Det gick inte att logga ut: ${error.message}`,true); }
+  } catch (error) { notify(`Could not sign out: ${error.message}`,true); }
   finally { $('#logout').disabled = false; }
 });
 async function restoreSession() {
@@ -114,7 +114,7 @@ async function restoreSession() {
       signedIn(session);
       await refresh();
     } else showLogin();
-  } catch (_) { showLogin('Kunde inte nå tjänsten. Försök logga in igen.'); }
+  } catch (_) { showLogin('Could not reach the service. Try signing in again.'); }
 }
 function notify(message, error = false) {
   $('#notice').hidden = false;
@@ -125,30 +125,30 @@ function outputRow(instance, output) {
   const stat = output.status, metric = output.metrics;
   const enabled = state.connected && output.ready && stat.startpos && stat.currpos && !state.busy.has(instance.name);
   const disabled = enabled ? '' : 'disabled';
-  const label = instance.process_state === 'stopped' || instance.process_state === 'exited' ? 'Stoppad' : output.stale ? 'Väntar på färsk status' : outputLabels[stat.state] || 'Väntar';
+  const label = instance.process_state === 'stopped' || instance.process_state === 'exited' ? 'Stopped' : output.stale ? 'Waiting for fresh status' : outputLabels[stat.state] || 'Waiting';
   const badge = output.stale ? 'stale' : (stat.state || '').toLowerCase();
   const delay = stat.lastpos && stat.currpos ? Math.max(0, (new Date(stat.lastpos) - new Date(stat.currpos)) / 1000) : null;
   const button = (action, text) => `<button class="output-command" data-action="${action}" data-path="${output.pathnumber}" ${disabled}>${text}</button>`;
-  return `<tr><td><span class="output-name">${escapeHTML(output.name)}</span><span class="sub">#${output.pathnumber} · ${escapeHTML(output.host)}:${output.port}<br>TTL ${output.ttl} · ${output.rawudp ? 'Raw UDP' : 'RTP bevaras'}</span></td>
-    <td><span class="badge ${badge}">${label}</span><span class="sub">${duration(delay)} efter buffertslut</span></td>
-    <td class="time">${timeText(stat.currpos)}<span class="sub">Från ${timeText(stat.startpos)}<br>Till ${timeText(stat.lastpos)}</span></td>
+  return `<tr><td><span class="output-name">${escapeHTML(output.name)}</span><span class="sub">#${output.pathnumber} · ${escapeHTML(output.host)}:${output.port}<br>TTL ${output.ttl} · ${output.rawudp ? 'Raw UDP' : 'RTP preserved'}</span></td>
+    <td><span class="badge ${badge}">${label}</span><span class="sub">${duration(delay)} behind buffer end</span></td>
+    <td class="time">${timeText(stat.currpos)}<span class="sub">From ${timeText(stat.startpos)}<br>To ${timeText(stat.lastpos)}</span></td>
     <td>${bps(metric.bitrateout)}<span class="sub">In ${bps(metric.bitratein)}<br>UDP-drops ${escapeHTML(metric.udpdrops ?? '—')}</span></td>
-    <td><div class="actions">${button('play','Spela')}${button('pause','Pausa')}${button('jump','Hoppa / schemalägg')}${button('playto','Spela till')}</div>
-    <span class="sub">Start ${timeText(stat.startplayat)} · Stopp ${timeText(stat.playto)}</span></td></tr>`;
+    <td><div class="actions">${button('play','Play')}${button('pause','Pause')}${button('jump','Jump / schedule')}${button('playto','Play until')}</div>
+    <span class="sub">Start ${timeText(stat.startplayat)} · Stop ${timeText(stat.playto)}</span></td></tr>`;
 }
 function render() {
   const focused = document.activeElement;
   const focusKey = focused?.dataset.action ? [focused.closest('[data-instance]')?.dataset.instance, focused.dataset.action, focused.dataset.path] : null;
   const openLogs = new Set([...document.querySelectorAll('details[open]')].map(el => el.closest('[data-instance]').dataset.instance));
-  $('#overview').innerHTML = `<div><strong>${state.instances.filter(i => i.process_state === 'running').length}/${state.instances.length}</strong><span>INSTANSER I DRIFT</span></div><div><strong>${state.instances.reduce((sum,i) => sum + i.outputs.length,0)}</strong><span>OUTPUTS</span></div>`;
+  $('#overview').innerHTML = `<div><strong>${state.instances.filter(i => i.process_state === 'running').length}/${state.instances.length}</strong><span>INSTANCES RUNNING</span></div><div><strong>${state.instances.reduce((sum,i) => sum + i.outputs.length,0)}</strong><span>OUTPUTS</span></div>`;
   $('#instances').innerHTML = state.instances.map(instance => {
     const running = instance.pid !== null;
     const disabled = state.busy.has(instance.name) ? 'disabled' : '';
-    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Buffert ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'på' : 'av'}</div></div><div class="instance-buttons"><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stoppa instansen för att ändra input och outputs' : 'Ändra input och outputs'}">Konfigurera</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stoppa instans' : 'Starta instans'}</button></div></div>
-      <div class="table-scroll"><table><thead><tr><th>Output</th><th>Status</th><th>Inspelad position / buffert</th><th>Trafik</th><th>Styrning per output</th></tr></thead><tbody>${instance.outputs.map(o => outputRow(instance,o)).join('')}</tbody></table></div>
-      ${instance.pending.length ? `<div class="queue">Kommandokö: ${instance.pending.map(c => `#${c.id} ${escapeHTML(c.action)} → output ${c.pathnumber}`).join(' · ')}</div>` : ''}
-      <details ${openLogs.has(instance.name) ? 'open' : ''}><summary>Senaste driftmeddelanden</summary><div class="logs">${instance.logs.map(log => `${timeText(log.timestamp)} ${escapeHTML(log.text)}`).join('\n') || 'Inga meddelanden ännu.'}</div></details></section>`;
-  }).join('') || '<section class="empty"><h2>Skapa din första instans</h2><p>Välj Ny instans för att konfigurera input och en eller flera outputs.</p></section>';
+    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Buffer ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</div></div><div class="instance-buttons"><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></div>
+      <div class="table-scroll"><table><thead><tr><th>Output</th><th>Status</th><th>Recorded position / buffer</th><th>Traffic</th><th>Output controls</th></tr></thead><tbody>${instance.outputs.map(o => outputRow(instance,o)).join('')}</tbody></table></div>
+      ${instance.pending.length ? `<div class="queue">Command queue: ${instance.pending.map(c => `#${c.id} ${escapeHTML(c.action)} → output ${c.pathnumber}`).join(' · ')}</div>` : ''}
+      <details ${openLogs.has(instance.name) ? 'open' : ''}><summary>Recent operational messages</summary><div class="logs">${instance.logs.map(log => `${timeText(log.timestamp)} ${escapeHTML(log.text)}`).join('\n') || 'No messages yet.'}</div></details></section>`;
+  }).join('') || '<section class="empty"><h2>Create your first instance</h2><p>Select New instance to configure an input and one or more outputs.</p></section>';
   if (focusKey) {
     const section = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === focusKey[0]);
     const next = section && [...section.querySelectorAll('button')].find(el => el.dataset.action === focusKey[1] && el.dataset.path === focusKey[2]);
@@ -165,7 +165,7 @@ async function refresh() {
     state.connected = true;
     $('#add-instance').disabled = false;
     document.body.classList.remove('disconnected');
-    $('#connection').textContent = `● Ansluten · ${new Date(result.sampled_at).toLocaleTimeString('sv-SE')}`;
+    $('#connection').textContent = `● Connected · ${new Date(result.sampled_at).toLocaleTimeString('en-GB')}`;
     $('#connection').className = 'online';
     render();
   } catch (error) {
@@ -173,7 +173,7 @@ async function refresh() {
     state.connected = false;
     $('#add-instance').disabled = true;
     document.body.classList.add('disconnected');
-    $('#connection').textContent = `Status saknas · ${error.message}`;
+    $('#connection').textContent = `Status unavailable · ${error.message}`;
     $('#connection').className = 'offline';
     document.querySelectorAll('.output-command,.config-command').forEach(button => button.disabled = true);
   }
@@ -184,7 +184,7 @@ async function send(name, path, body) {
   try {
     const url = path == null ? `/api/instances/${name}/${body.action}` : `/api/instances/${name}/outputs/${path}/commands`;
     const result = await api(url, path == null ? {} : body);
-    notify(path == null ? `${name}: ${body.action === 'start' ? 'start begärd' : 'stoppad'}.` : `${name} / output ${path}: kommando #${result.command_id} köat. Status uppdateras när det har hanterats.`);
+    notify(path == null ? `${name}: ${body.action === 'start' ? 'start requested' : 'stopped'}.` : `${name} / output ${path}: command #${result.command_id} queued. Status will update once it has been processed.`);
   } finally {
     state.busy.delete(name);
     await refresh();
@@ -200,15 +200,15 @@ $('#instances').addEventListener('click', async event => {
     openConfiguration(state.instances.find(instance => instance.name === name));
     return;
   }
-  if (action === 'stop' && !confirm(`Stoppa ${name}? Inspelning och samtliga outputs för instansen stoppas.`)) return;
+  if (action === 'stop' && !confirm(`Stop ${name}? Recording and all outputs for this instance will stop.`)) return;
   if (action === 'jump' || action === 'playto') {
     state.target = {name,path,action};
     const output = state.instances.find(i => i.name === name).outputs.find(o => o.pathnumber === path);
     const form = $('#command-form');
     form.reset();
     $('#target-name').textContent = `${name} / #${path} ${output.name}`;
-    $('#dialog-title').textContent = action === 'jump' ? 'Hoppa till inspelad tid' : 'Ange sluttid';
-    $('#command-help').textContent = action === 'jump' ? `Tillgängligt: ${timeText(output.status.startpos)} – ${timeText(output.status.lastpos)}` : 'Outputen pausas vid valt klockslag i verklig tid. Ett tomt fält tar bort sluttiden.';
+    $('#dialog-title').textContent = action === 'jump' ? 'Jump to recorded time' : 'Set stop time';
+    $('#command-help').textContent = action === 'jump' ? `Available: ${timeText(output.status.startpos)} – ${timeText(output.status.lastpos)}` : 'The output pauses at the selected wall-clock time. Leave blank to clear the stop time.';
     $('#jump-field').hidden = action !== 'jump';
     $('#schedule-field').hidden = action !== 'jump';
     form.elements.jumptopos.required = action === 'jump';
@@ -245,18 +245,18 @@ function outputFields(output = {}) {
   const fieldset = document.createElement('fieldset');
   fieldset.className = 'output-fields';
   fieldset.innerHTML = `<legend>Output</legend><div class="config-grid">
-    <label>Namn<input data-field="name" required maxlength="100" value="${escapeHTML(output.name || '')}"></label>
-    <label>Multicastadress<input data-field="host" required placeholder="239.20.0.1" value="${escapeHTML(output.host || '')}" autocomplete="off"></label>
+    <label>Name<input data-field="name" required maxlength="100" value="${escapeHTML(output.name || '')}"></label>
+    <label>Multicast address<input data-field="host" required placeholder="239.20.0.1" value="${escapeHTML(output.host || '')}" autocomplete="off"></label>
     <label>Port<input data-field="port" type="number" required min="1" max="65535" value="${output.port || 1234}"></label>
     <label>TTL<input data-field="ttl" type="number" required min="1" max="255" value="${output.ttl || 7}"></label>
-    </div><div class="output-options"><label class="checkbox"><input data-field="rawudp" type="checkbox" ${output.rawudp ? 'checked' : ''}>Raw UDP · strippa RTP</label><button type="button" data-remove-output>Ta bort output</button></div>`;
+    </div><div class="output-options"><label class="checkbox"><input data-field="rawudp" type="checkbox" ${output.rawudp ? 'checked' : ''}>Raw UDP · strip RTP</label><button type="button" data-remove-output>Remove output</button></div>`;
   $('#configuration-outputs').append(fieldset);
   numberOutputs();
 }
 function numberOutputs() {
   const rows = [...document.querySelectorAll('.output-fields')];
   rows.forEach((row,index) => {
-    $('legend',row).textContent = `Output #${index}${index === 0 ? ' · primär' : ''}`;
+    $('legend',row).textContent = `Output #${index}${index === 0 ? ' · primary' : ''}`;
     $('[data-remove-output]',row).disabled = rows.length === 1;
   });
   $('#add-output').disabled = rows.length >= 8;
@@ -271,7 +271,7 @@ function openConfiguration(instance = null) {
   form.elements.autostart.checked = instance?.autostart || false;
   form.elements.source_host.value = instance?.source.host || '';
   form.elements.source_port.value = instance?.source.port || 1234;
-  $('#configuration-title').textContent = instance ? `Konfigurera ${instance.name}` : 'Ny instans';
+  $('#configuration-title').textContent = instance ? `Configure ${instance.name}` : 'New instance';
   $('#configuration-outputs').replaceChildren();
   for (const output of instance?.outputs || [{name:'Program'}]) outputFields(output);
   $('#configuration-error').textContent = '';
@@ -305,7 +305,7 @@ $('#configuration-form').addEventListener('submit', async event => {
   try {
     await api(state.editing ? `/api/instances/${state.editing}/configuration` : '/api/instances',body);
     $('#configuration-dialog').close();
-    notify(`${body.name}: konfiguration sparad. Instansen kan startas när du är redo.`);
+    notify(`${body.name}: configuration saved. Start the instance when you are ready.`);
     await refresh();
   } catch (error) { $('#configuration-error').textContent = error.message; }
   finally { submit.disabled = false; }

@@ -17,6 +17,7 @@ from auth_client import Client
 
 client = Client()
 produced_times = {}
+multicast_interface = os.environ.get('DELAYER_MULTICAST_INTERFACE') or '0.0.0.0'
 
 
 def request(path, body=None, auth=True, control=True):
@@ -49,7 +50,9 @@ class Receiver:
         self.sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
         self.sock.bind((group,1234))
-        self.sock.setsockopt(socket.IPPROTO_IP,socket.IP_ADD_MEMBERSHIP,socket.inet_aton(group)+socket.inet_aton('0.0.0.0'))
+        self.sock.setsockopt(socket.IPPROTO_IP,socket.IP_ADD_MEMBERSHIP,socket.inet_aton(group)+socket.inet_aton(multicast_interface))
+        # Linux IP_MULTICAST_ALL=0 prevents another socket's memberships masking a wrong NIC.
+        self.sock.setsockopt(socket.IPPROTO_IP,49,0)
         self.sock.settimeout(.2)
         self.packets = []
         self.done = False
@@ -70,6 +73,7 @@ def producer(group, stop):
     sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
     sock.setsockopt(socket.IPPROTO_IP,socket.IP_MULTICAST_TTL,1)
     sock.setsockopt(socket.IPPROTO_IP,socket.IP_MULTICAST_LOOP,1)
+    sock.setsockopt(socket.IPPROTO_IP,socket.IP_MULTICAST_IF,socket.inet_aton(multicast_interface))
     index = 0
     produced_times[group] = {}
     while not stop.is_set():

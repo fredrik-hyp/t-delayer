@@ -1,64 +1,64 @@
 <!doctype html>
-<html lang="sv">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>T-Delayer · Kontrollrum</title>
+  <title>T-Delayer · Control room</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body class="signed-out">
-  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Kontrollrum</span></div></div><div class="session-tools"><div id="connection" role="status" hidden>Ansluter…</div><div id="user-menu" hidden><span id="session-user"></span><button id="logout" type="button">Logga ut</button></div></div></header>
+  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Control room</span></div></div><div class="session-tools"><div id="connection" role="status" hidden>Connecting…</div><div id="user-menu" hidden><span id="session-user"></span><button id="logout" type="button">Sign out</button></div></div></header>
   <main id="login-view" class="login-view">
     <section class="login-card" aria-labelledby="login-title">
-      <p class="eyebrow">T-DELAYER / KONTROLLRUM</p>
-      <h1 id="login-title">Logga in</h1>
-      <p>Hantera dina strömmar, outputs och uppspelningar.</p>
+      <p class="eyebrow">T-DELAYER / CONTROL ROOM</p>
+      <h1 id="login-title">Sign in</h1>
+      <p>Manage your streams, outputs and playback.</p>
       <form id="login-form" action="/api/auth/login" method="post">
-        <label for="login-username">Användarnamn</label>
+        <label for="login-username">Username</label>
         <input id="login-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required>
-        <label for="login-password">Lösenord</label>
-        <div class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="1024" required><button id="password-visibility" type="button" aria-label="Visa lösenord" aria-controls="login-password" aria-pressed="false">Visa</button></div>
+        <label for="login-password">Password</label>
+        <div class="password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="1024" required><button id="password-visibility" type="button" aria-label="Show password" aria-controls="login-password" aria-pressed="false">Show</button></div>
         <p id="login-error" class="form-error" role="alert" aria-live="polite"></p>
-        <button id="login-submit" class="primary" type="submit" disabled>Kontrollerar session…</button>
+        <button id="login-submit" class="primary" type="submit" disabled>Checking session…</button>
       </form>
-      <noscript>Aktivera JavaScript för att använda kontrollrummet.</noscript>
+      <noscript>Enable JavaScript to use the control room.</noscript>
     </section>
   </main>
   <main id="dashboard" hidden>
-    <div class="intro"><div><p class="eyebrow">MULTICAST / DRIFT</p><h1>Strömmar under kontroll.</h1><p>Live-status och individuell uppspelning för varje output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><button id="add-instance" class="primary" disabled>Ny instans</button></div></div>
+    <div class="intro"><div><p class="eyebrow">MULTICAST / OPERATIONS</p><h1>Streams under control.</h1><p>Live status and independent playback for every output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><button id="add-instance" class="primary" disabled>New instance</button></div></div>
     <div id="notice" role="status" aria-live="polite" hidden></div>
-    <div id="instances"><p class="empty">Hämtar instanser…</p></div>
+    <div id="instances"><p class="empty">Loading instances…</p></div>
   </main>
-  <footer id="dashboard-footer" hidden>Status hämtas varannan sekund. Tider visas i din lokala tidszon: <span id="timezone"></span>. Inspelning fortsätter när en output pausas.</footer>
+  <footer id="dashboard-footer" hidden>Status refreshes every two seconds. Times are shown in your local time zone: <span id="timezone"></span>. Recording continues when an output is paused.</footer>
   <dialog id="command-dialog">
     <form id="command-form">
-      <div class="dialog-heading"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Styr output</h2></div><button type="button" class="close" aria-label="Stäng">×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Control output</h2></div><button type="button" class="close" aria-label="Close">×</button></div>
       <p id="command-help"></p>
-      <label id="jump-field">Inspelad tid<input type="datetime-local" name="jumptopos" step="1"></label>
-      <label id="schedule-field">Starta uppspelning vid (valfritt)<input type="datetime-local" name="startplayat" step="1"><small>Tomt fält: hoppa till positionen och pausa. Välj Spela för att fortsätta.</small></label>
-      <label id="end-field">Stoppa vid klockslag (valfritt)<input type="datetime-local" name="playto" step="1"><small>Tomt fält tar bort eventuell sluttid.</small></label>
+      <label id="jump-field">Recorded time<input type="datetime-local" name="jumptopos" step="1"></label>
+      <label id="schedule-field">Start playback at (optional)<input type="datetime-local" name="startplayat" step="1"><small>Leave blank to jump to the position and pause. Select Play to resume.</small></label>
+      <label id="end-field">Stop at wall-clock time (optional)<input type="datetime-local" name="playto" step="1"><small>Leave blank to clear any stop time.</small></label>
       <p class="form-error" id="form-error" role="alert"></p>
-      <div class="dialog-actions"><button type="button" class="cancel">Avbryt</button><button type="submit" class="primary">Skicka kommando</button></div>
+      <div class="dialog-actions"><button type="button" class="cancel">Cancel</button><button type="submit" class="primary">Send command</button></div>
     </form>
   </dialog>
   <dialog id="configuration-dialog">
     <form id="configuration-form">
-      <div class="dialog-heading"><div><p class="eyebrow">INPUT &amp; OUTPUTS</p><h2 id="configuration-title">Ny instans</h2></div><button type="button" data-close-config class="close" aria-label="Stäng konfiguration">×</button></div>
-      <p>Konfigurationen sparas för nästa start av instansen. Uppspelningsstyrning fungerar separat under drift.</p>
+      <div class="dialog-heading"><div><p class="eyebrow">INPUT &amp; OUTPUTS</p><h2 id="configuration-title">New instance</h2></div><button type="button" data-close-config class="close" aria-label="Close configuration">×</button></div>
+      <p>Configuration is saved for the next instance start. Playback controls remain available during operation.</p>
       <div class="config-grid">
-        <label>Instansnamn<input name="instance_name" required maxlength="40" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,39}" autocomplete="off"></label>
-        <label>Buffert (minuter)<input name="buffer_minutes" type="number" required min="0.167" max="35791" step="any" value="60"></label>
+        <label>Instance name<input name="instance_name" required maxlength="40" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,39}" autocomplete="off"></label>
+        <label>Buffer (minutes)<input name="buffer_minutes" type="number" required min="0.167" max="35791" step="any" value="60"></label>
       </div>
-      <label class="checkbox"><input type="checkbox" name="autostart">Starta automatiskt när containern startar</label>
+      <label class="checkbox"><input type="checkbox" name="autostart">Start automatically when the container starts</label>
       <fieldset><legend>Input · UDP multicast</legend><div class="config-grid">
-        <label>Multicastadress<input name="source_host" required placeholder="239.10.0.1" autocomplete="off"></label>
+        <label>Multicast address<input name="source_host" required placeholder="239.10.0.1" autocomplete="off"></label>
         <label>Port<input name="source_port" type="number" required min="1" max="65535" value="1234"></label>
       </div></fieldset>
-      <div class="outputs-heading"><h3>Outputs</h3><button type="button" id="add-output">Lägg till output</button></div>
+      <div class="outputs-heading"><h3>Outputs</h3><button type="button" id="add-output">Add output</button></div>
       <div id="configuration-outputs"></div>
       <p class="form-error" id="configuration-error" role="alert"></p>
-      <div class="dialog-actions"><button type="button" data-close-config>Avbryt</button><button type="submit" class="primary">Spara konfiguration</button></div>
+      <div class="dialog-actions"><button type="button" data-close-config>Cancel</button><button type="submit" class="primary">Save configuration</button></div>
     </form>
   </dialog>
 </body>

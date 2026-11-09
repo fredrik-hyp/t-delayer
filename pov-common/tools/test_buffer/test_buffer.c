@@ -78,23 +78,23 @@ int main(int argc, char **argv)
 {
 
 
-// Testordning
-// Skapa alla buffrar
-// Frigör alla buffrar
-// Skapa alla buffrar
-// Flytta första elementet sist
-// Elementet till en annan buffert
-	// först -> sist
-	// först -> Först
-	// först -> I mitten 
-	// I mitten -> sist
-	// I mitten -> Först
-	// I Mitten -> Sist
-	// Sist -> sist
-	// Sist -> först
-	// sist -> i mitten
-// Hitta element först, mitten sist ta bort
-// Returnera buffert
+// Test sequence
+// Create all buffers
+// Free all buffers
+// Create all buffers
+// Move the first element to the end
+// Move the element to another buffer
+	// first -> last
+	// first -> first
+	// first -> middle
+	// middle -> last
+	// middle -> first
+	// middle -> last
+	// last -> last
+	// last -> first
+	// last -> middle
+// Find and remove elements at the beginning, middle and end
+// Return the buffer
 // ....
 	// === PROGRAM START ===
 	// Statistic variables

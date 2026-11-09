@@ -5,9 +5,9 @@ if [ `whoami` != "root" ]; then
 	exit
 fi
 
-echo "3) Om action är satt till pause eller play så ska uppspelningen"
-echo "pausas eller fortsätta, inget hopp ska göras i detta fall utan spela"
-echo "från currpos"
+echo "3) If action is set to pause or play, playback should"
+echo "pause or resume without jumping; play"
+echo "from currpos"
 
 interface=1
 pathnumber=0

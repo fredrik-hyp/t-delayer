@@ -42,6 +42,13 @@ nginx lyssna direkt på hostens `WEB_PORT`, utan en separat portforward. Docker 
 verifiera fysisk multicast på Linux innan drift. Se
 [Dockers dokumentation om host networking](https://docs.docker.com/engine/network/drivers/host/).
 
+På en host med flera nätverkskort: sätt `DELAYER_MULTICAST_INTERFACE` i `.env`
+till multicastkortets lokala IPv4-adress, t.ex. `192.168.42.99`. Alla instansers
+inputs går då med i multicastgrupper på det kortet och alla outputs använder
+det för utskick. Inställningen kräver en containeromstart. En ogiltig eller
+icke-lokal adress stoppar uppstarten. Tomt värde behåller systemets routingval.
+Webbport, databasanslutning och andra tjänsters routing påverkas inte.
+
 Webbkontrollen har en integrerad inloggningssida och en knapp för utloggning.
 Användaren loggar in med `WEB_USERNAME` (standard `admin`) och `WEB_PASSWORD`.
 `WEB_PASSWORD_FILE` kan peka på en monterad Docker secret i stället. Lösenordet
@@ -60,12 +67,12 @@ webbläsarens inbyggda inloggningsruta.
 
 ## Konfiguration och flera instanser
 
-Välj **Ny instans** i UI:t för att skapa en instans med multicastinput, bufferttid
+Välj **New instance** i UI:t för att skapa en instans med multicastinput, bufferttid
 samt en till åtta outputs. Varje output har eget namn, adress, port, TTL och
-`rawudp`. Sparandet startar ingen process; välj **Starta instans** när
+`rawudp`. Sparandet startar ingen process; välj **Start instance** när
 konfigurationen är klar. Kryssrutan för autostart gäller nästa containerstart.
 
-Välj **Konfigurera** på en stoppad instans för att ändra input, lägga till eller
+Välj **Configure** på en stoppad instans för att ändra input, lägga till eller
 ta bort outputs och ändra deras inställningar. En körande instans måste stoppas
 före nätverksändringar. Uppspelningskommandon kan fortsatt användas per output
 utan omstart. Befintligt inspelat buffertmaterial behålls om input ändras.
@@ -114,11 +121,11 @@ tidsstämpel är äldre än tio sekunder eller statusanslutningen försvinner.
 
 Varje output kan oberoende:
 
-- **Pausa:** stoppa utskick och behålla uppspelningspositionen.
-- **Spela:** fortsätta från pauspositionen i inspelad takt.
-- **Hoppa:** söka till en inspelad tid inom bufferten och pausa där.
-- **Schemalägg:** hoppa till inspelad tid X och starta vid verkligt klockslag Y.
-- **Spela till:** pausa vid valt verkligt klockslag. Tom sluttid tar bort stoppet.
+- **Pause:** stoppa utskick och behålla uppspelningspositionen.
+- **Play:** fortsätta från pauspositionen i inspelad takt.
+- **Jump / schedule (jump):** söka till en inspelad tid inom bufferten och pausa där.
+- **Jump / schedule (schedule):** hoppa till inspelad tid X och starta vid verkligt klockslag Y.
+- **Play until:** pausa vid valt verkligt klockslag. Tom sluttid tar bort stoppet.
 
 Detta är befintliga `jump`, `play`, `pause`, `playto`-semantiken. `playto` är ett
 **verkligt klockslag**, inte en position i inspelningen. Ett vanligt `play` utan
@@ -203,7 +210,7 @@ migrationen. Äldre versioner behöver föregående migrationer.
 ```sh
 docker compose logs -f delayer
 docker compose ps
-docker compose down                 # behåller databas och inspelning
+docker compose down                 # preserves the database and recordings
 python3 docker-runtime/tests/run.py  # isolerat integrationstest, bygger images
 ```
 

@@ -21,9 +21,9 @@ if [ ! -z "$SELECT" ]; then
 	exit
 fi
 
-echo "2) Delayern läser in action column från delayercoms tabell, action = \"jump\""
-echo "2.1) Delayern läser ut tid att hoppa till, t"
-echo "2.1.0.b) Om jumpto är äldre än bufferten  => Error - do nothing"
+echo "2) The delayer reads the action column from the delayercoms table, action = \"jump\""
+echo "2.1) The delayer reads the time to jump to, t"
+echo "2.1.0.b) If jumpto is older than the buffer  => Error - do nothing"
 
 su - postgres -c "psql delayerdb -c \"INSERT INTO delayercoms (streaminterface_id, pathnumber, action, jumptopos, startplayat, playto) VALUES ('$interface', '$pathnumber', 'jump', now()-(20 || 'year')::interval, NULL, NULL);\""
 

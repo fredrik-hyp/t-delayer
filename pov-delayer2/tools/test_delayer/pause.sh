@@ -21,9 +21,9 @@ if [ ! -z "$SELECT" ]; then
 	exit
 fi
 
-echo "3) Om action är satt till pause eller play så ska uppspelningen"
-echo "pausas eller fortsätta, inget hopp ska göras i detta fall utan spela"
-echo "från currpos"
+echo "3) If action is set to pause or play, playback should"
+echo "pause or resume without jumping; play"
+echo "from currpos"
 
 su - postgres -c "psql delayerdb -c \"INSERT INTO delayercoms (streaminterface_id, pathnumber, action, jumptopos, startplayat, playto) VALUES ('$interface', '$pathnumber', 'pause', NULL, NULL, NULL);\""
 

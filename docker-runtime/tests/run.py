@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='delayer-test-') as temporary:
     config['instances'][1]['autostart'] = True
     (temp/'instances.json').write_text(json.dumps(config))
     # Named test volumes are scoped by a unique Compose project, then removed.
-    override = {'services':{'delayer':{'environment':{'PGHOST':'database','PGPORT':'5432','TEST_BASEURL':'http://web:8080'},'volumes':[
+    override = {'services':{'delayer':{'environment':{'PGHOST':'database','PGPORT':'5432','TEST_BASEURL':'http://web:8080','DELAYER_MULTICAST_INTERFACE':'127.0.0.1'},'volumes':[
         {'type':'bind','source':str(temp/'instances.json'),'target':'/etc/delayer/instances.json','read_only':True},
         {'type':'bind','source':str(ROOT/'docker-runtime/tests'),'target':'/tests','read_only':True}]}}}
     (temp/'override.json').write_text(json.dumps(override))
@@ -38,6 +38,12 @@ with tempfile.TemporaryDirectory(prefix='delayer-test-') as temporary:
           INSERT INTO streaminterfaceconfigs (streaminterface_id,mode) VALUES (1,'unused'),(1,'unused');"""
         compose('exec','-T','database','psql','-U','delayer','-d','delayerdb','-v','ON_ERROR_STOP=1','-c',sql,stdout=subprocess.DEVNULL)
         compose('up','-d','--build','--wait','delayer','web')
+        for address in ('invalid', '239.1.1.1', '192.0.2.1'):
+            invalid = subprocess.run(['docker','run','--rm','-e','WEB_PASSWORD=startup-test',
+                '-e','DELAYER_MULTICAST_INTERFACE='+address,'t-delayer:runtime'],
+                capture_output=True,text=True,timeout=20)
+            assert invalid.returncode != 0 and 'Invalid DELAYER_MULTICAST_INTERFACE' in invalid.stderr, invalid.stderr
+        print('PASS invalid and unavailable multicast interfaces rejected at startup')
         compose('exec','-T','delayer','python3','-m','unittest','discover','-s','/tests','-p','test_*.py','-v')
         compose('exec','-T','delayer','python3','/tests/integration.py')
         # A second runtime against the same streams must fail ownership acquisition.

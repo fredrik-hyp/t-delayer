@@ -106,9 +106,9 @@ def validate_instances(instances):
 
 def validate_configuration(body):
     if not isinstance(body, dict) or set(body) - {"name", "source", "outputs", "msbuffer", "autostart"}:
-        raise ValueError("Okända konfigurationsfält")
+        raise ValueError("Unknown configuration fields")
     if "source" not in body or "outputs" not in body:
-        raise ValueError("Input och minst en output krävs")
+        raise ValueError("An input and at least one output are required")
     return validate_instances([dict(body, autostart=body.get("autostart", False))])[0]
 
 
@@ -311,14 +311,14 @@ class Instance:
             with database() as cur:
                 snapshot = self.snapshot(cur)
                 if not self.process or self.process.poll() is not None:
-                    raise APIError(409, "Instansen är stoppad")
+                    raise APIError(409, "The instance is stopped")
                 outputs = {item["pathnumber"]: item for item in snapshot["outputs"]}
                 if path not in outputs:
-                    raise APIError(404, "Output finns inte")
+                    raise APIError(404, "Output does not exist")
                 if not outputs[path]["ready"]:
-                    raise APIError(409, "Vänta tills instansen har färsk status")
+                    raise APIError(409, "Wait until the instance has fresh status")
                 if not outputs[path]["status"].get("startpos") or not outputs[path]["status"].get("currpos"):
-                    raise APIError(409, "Ingen inspelad data i bufferten ännu")
+                    raise APIError(409, "No recorded data in the buffer yet")
                 command = validate_command(body, outputs[path]["status"])
                 cur.execute("""INSERT INTO delayercoms
                     (streaminterface_id,pathnumber,action,jumptopos,startplayat,playto)
@@ -331,7 +331,7 @@ class Instance:
             except ProcessLookupError:
                 with database() as cur:
                     cur.execute("DELETE FROM delayercoms WHERE id=%s", (command_id,))
-                raise APIError(409, "Instansen avslutades innan kommandot kunde levereras")
+                raise APIError(409, "The instance exited before the command could be delivered")
             LOG.info("Command id=%s instance=%s path=%s action=%s", command_id, self.name, path, command["action"])
             return {"accepted": True, "command_id": command_id, "instance": self.name, "pathnumber": path}
 
@@ -340,7 +340,7 @@ def parse_time(value, field):
     if value is None or value == "":
         return None
     if not isinstance(value, str) or len(value) > 64:
-        raise APIError(400, f"{field}: ange ISO 8601 med tidszon")
+        raise APIError(400, f"{field}: use ISO 8601 with a time zone")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.year < 1970 or parsed.year > 2200:
@@ -348,33 +348,33 @@ def parse_time(value, field):
         # DB uses timestamp without time zone, consistently UTC.
         return parsed.astimezone(timezone.utc).replace(tzinfo=None)
     except ValueError:
-        raise APIError(400, f"{field}: ange ISO 8601 med tidszon")
+        raise APIError(400, f"{field}: use ISO 8601 with a time zone")
 
 
 def validate_command(body, stat):
     action = body.get("action")
     if action not in ("jump", "play", "pause", "playto"):
-        raise APIError(400, "Välj jump, play, pause eller playto")
+        raise APIError(400, "Choose jump, play, pause or playto")
     if set(body) - {"action", "jumptopos", "startplayat", "playto"}:
-        raise APIError(400, "Okänt kommandofält")
+        raise APIError(400, "Unknown command field")
     result = {key: parse_time(body.get(key), key) for key in ("jumptopos", "startplayat", "playto")}
     result["action"] = action
     if action == "jump":
         pos = result["jumptopos"]
         if pos is None:
-            raise APIError(400, "Jump kräver inspelad tid")
+            raise APIError(400, "Jump requires a recorded time")
         if not stat.get("startpos") or not stat.get("lastpos") or not stat["startpos"] <= pos <= stat["lastpos"]:
-            raise APIError(409, "Tiden ligger utanför tillgänglig buffert")
+            raise APIError(409, "The time is outside the available buffer")
         if result["startplayat"] and result["startplayat"] <= datetime.now(timezone.utc).replace(tzinfo=None):
-            raise APIError(400, "Schemalagd start måste ligga i framtiden")
+            raise APIError(400, "The scheduled start must be in the future")
     elif result["jumptopos"] or result["startplayat"]:
-        raise APIError(400, "Inspelad tid och schemalagd start används endast med jump")
+        raise APIError(400, "Recorded time and scheduled start can only be used with jump")
     if action == "pause" and result["playto"]:
-        raise APIError(400, "Pause kan inte ha en sluttid")
+        raise APIError(400, "Pause cannot have a stop time")
     if result["playto"]:
         earliest = result["startplayat"] or datetime.now(timezone.utc).replace(tzinfo=None)
         if result["playto"] <= earliest:
-            raise APIError(400, "Sluttiden måste ligga efter uppspelningens start i verklig tid")
+            raise APIError(400, "The stop time must be after the playback start in wall-clock time")
     # playto with null explicitly clears an existing stop position.
     return result
 
@@ -415,24 +415,24 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def request_json(self):
         if self.headers.get("X-Delayer-Control") != "1" or self.headers.get_content_type() != "application/json":
-            raise APIError(403, "JSON och X-Delayer-Control: 1 krävs")
+            raise APIError(403, "JSON and X-Delayer-Control: 1 are required")
         origin = self.headers.get("Origin")
         host = self.headers.get("Host", "")
         if origin and origin not in ("http://" + host, "https://" + host):
-            raise APIError(403, "Begäran måste komma från webbgränssnittets egen adress")
+            raise APIError(403, "The request must come from the web interface origin")
         length = int(self.headers.get("Content-Length", "0"))
         if not 0 < length <= 16384:
-            raise APIError(400, "Ogiltig requeststorlek")
+            raise APIError(400, "Invalid request size")
         body = json.loads(self.rfile.read(length))
         if not isinstance(body, dict):
-            raise APIError(400, "Requesten måste vara ett JSON-objekt")
+            raise APIError(400, "The request must be a JSON object")
         return body
 
     def handle_request(self, post):
         try:
             manager = self.server.manager
             if manager.shutdown.is_set():
-                raise APIError(503, "Kontrolltjänsten stängs av")
+                raise APIError(503, "The control service is shutting down")
             if not post and self.path == "/healthz":
                 with database() as cur:
                     cur.execute("SELECT 1")
@@ -448,7 +448,7 @@ class APIHandler(BaseHTTPRequestHandler):
             if post and self.path == "/api/auth/login":
                 body = self.request_json()
                 if set(body) - {"username", "password"}:
-                    raise APIError(400, "Ange användarnamn och lösenord")
+                    raise APIError(400, "Provide a username and password")
                 token = manager.auth.login(body.get("username"), body.get("password"),
                                            self.headers.get("X-Real-IP", "local"))
                 manager.auth.revoke(cookie)
@@ -460,7 +460,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.respond(200, {"authenticated": False}, manager.auth.cookie())
                 return
             if not authenticated:
-                raise APIError(401, "Logga in för att öppna kontrollrummet")
+                raise APIError(401, "Sign in to open the control room")
             if not post and self.path == "/api/status":
                 with database() as cur:
                     instances = [item.snapshot(cur) for item in manager.list_instances()]
@@ -469,7 +469,7 @@ class APIHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/instances/([A-Za-z0-9_.-]+)/(start|stop|configuration|outputs/(\d+)/commands)", self.path)
             creating = self.path == "/api/instances"
             if not post or (not creating and (not match or match[1] not in manager.instances)):
-                raise APIError(404, "Resursen finns inte")
+                raise APIError(404, "Resource does not exist")
             body = self.request_json()
             if creating:
                 self.respond(201, manager.create_instance(body))
@@ -493,10 +493,10 @@ class APIHandler(BaseHTTPRequestHandler):
             self.respond(400, {"error": str(error)})
         except psycopg2.Error:
             LOG.exception("Database request failed")
-            self.respond(503, {"error": "Databasen är inte tillgänglig"})
+            self.respond(503, {"error": "The database is unavailable"})
         except Exception:
             LOG.exception("Request failed")
-            self.respond(500, {"error": "Internt fel; se containerloggen"})
+            self.respond(500, {"error": "Internal error; see the container log"})
 
 
 class HTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -528,24 +528,24 @@ class Manager:
                     for instance in self.instances.values() if instance.name != item["name"]
                     for output in instance.runtime["outputs"]}
         if any((output["host"], output["port"]) in occupied for output in item["outputs"]):
-            raise APIError(409, "En annan instans använder redan denna outputadress och port")
+            raise APIError(409, "Another instance already uses this output address and port")
 
     def create_instance(self, body):
         item = validate_configuration(body)
         name = item["name"]
         with self.lock:
             if name in self.instances:
-                raise APIError(409, "Instansnamnet finns redan")
+                raise APIError(409, "The instance name already exists")
             self.check_destinations(item)
             with self.owner_lock, self.owner.cursor() as cur:
                 cur.execute("SELECT pg_try_advisory_lock(hashtextextended(%s,0))", ("delayer:" + name,))
                 if not cur.fetchone()[0]:
-                    raise APIError(409, "Instansen används redan av en annan container")
+                    raise APIError(409, "The instance is already owned by another container")
             try:
                 with database() as cur:
                     cur.execute("SELECT id FROM streaminterfaces WHERE name=%s", (name,))
                     if cur.fetchone():
-                        raise APIError(409, "Instansnamnet finns redan i databasen")
+                        raise APIError(409, "The instance name already exists in the database")
                     insert_configuration(cur, item)
                     runtime = read_instance(cur, name)
                     cur.execute("""INSERT INTO delayerwebinstances (streaminterface_id,controller_id,autostart)
@@ -563,12 +563,12 @@ class Manager:
     def configure_instance(self, name, body):
         item = validate_configuration(body)
         if item["name"] != name:
-            raise APIError(400, "Instansnamnet kan inte ändras")
+            raise APIError(400, "The instance name cannot be changed")
         with self.lock:
             instance = self.instances[name]
             with instance.lock:
                 if instance.process and instance.process.poll() is None:
-                    raise APIError(409, "Stoppa instansen innan input eller outputs ändras")
+                    raise APIError(409, "Stop the instance before changing its input or outputs")
                 self.check_destinations(item)
                 with database() as cur:
                     runtime = read_instance(cur, name)

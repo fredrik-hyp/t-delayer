@@ -4,15 +4,75 @@ const state = {instances: [], connected: false, target: null, busy: new Set(), e
 const processLabels = {running: 'Running', starting: 'Starting / waiting for status', stopped: 'Stopped', exited: 'Process exited'};
 const outputLabels = {Live: 'Live', Play: 'Delayed', Pause: 'Paused'};
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const timeText = value => value ? new Date(value).toLocaleString('en-GB') : '—';
+const timeText = value => value ? new Date(value).toISOString().slice(0, 19).replace('T', ' ') + ' UTC' : '—';
 const bps = value => value == null ? '—' : `${(Number(value) / 1000000).toFixed(2)} Mbit/s`;
 const duration = value => value == null ? '—' : `${Number(value).toFixed(1)} s`;
-const localInput = value => {
-  if (!value) return '';
-  const date = new Date(value);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
-};
-$('#timezone').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
+function byteSize(value) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+  const index = Math.min(Math.floor(Math.log2(Math.max(1, value)) / 10), units.length - 1);
+  return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+function resourceMeter(id, value) {
+  const meter = $(id);
+  const available = value != null && Number.isFinite(value);
+  const percent = available ? Math.max(0, Math.min(100, value)) : 0;
+  $('span', meter).style.width = `${percent}%`;
+  meter.classList.toggle('warning', available && percent >= 85);
+  meter.classList.toggle('critical', available && percent >= 95);
+  if (available) meter.setAttribute('aria-valuenow', percent.toFixed(1));
+  else meter.removeAttribute('aria-valuenow');
+  meter.setAttribute('aria-valuetext', available ? `${percent.toFixed(1)}%` : 'Unavailable');
+}
+function renderSystem(metrics, offline = false) {
+  const {storage, cpu, network} = metrics || {};
+  $('#system-status').textContent = offline ? 'Status unavailable' : storage && cpu && network ? '● Live · every 2 seconds' : 'Some metrics unavailable · retrying';
+  $('.system-panel').classList.toggle('unavailable', offline);
+  $('#storage-value').textContent = byteSize(storage?.available_bytes);
+  $('#storage-detail').textContent = storage ? `of ${byteSize(storage.total_bytes)} total · ${storage.path}` : 'Recording storage unavailable';
+  $('#cpu-value').textContent = cpu?.usage_percent == null ? '—' : `${cpu.usage_percent.toFixed(1)}%`;
+  $('#cpu-detail').textContent = cpu ? 'Across all system CPUs' : 'Waiting for CPU sample';
+  $('#network-in').textContent = bps(network?.rx_bps);
+  $('#network-out').textContent = bps(network?.tx_bps);
+  $('#network-detail').textContent = network ? `${network.interfaces.join(', ') || 'No interfaces'} · excluding loopback` : 'Waiting for network sample';
+  resourceMeter('#storage-meter', storage?.used_percent);
+  resourceMeter('#cpu-meter', cpu?.usage_percent);
+}
+function bufferSummary(instance) {
+  // Buffer bounds are shared by all outputs; playback positions can differ.
+  const output = instance.outputs.find(output => output.ready && !output.stale &&
+    output.status.startpos && output.status.lastpos &&
+    Number.isFinite(Date.parse(output.status.startpos)) && Number.isFinite(Date.parse(output.status.lastpos)) &&
+    Date.parse(output.status.lastpos) >= Date.parse(output.status.startpos));
+  let buffered = '—', oldest = '—', latest = '—';
+  if (output) {
+    const seconds = Math.floor((Date.parse(output.status.lastpos) - Date.parse(output.status.startpos)) / 1000);
+    const days = Math.floor(seconds / 86400);
+    buffered = `${days ? `${days}d ` : ''}${Math.floor(seconds / 3600) % 24}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
+    oldest = timeText(output.status.startpos);
+    latest = timeText(output.status.lastpos);
+  }
+  return `<dl class="buffer-summary" aria-label="Instance buffer" title="Recorded buffer bounds, independent of each output's playback position.">
+    <div><dt>Total buffered time</dt><dd>${buffered}</dd></div>
+    <div><dt>Oldest in buffer (UTC)</dt><dd>${oldest}</dd></div>
+    <div><dt>Latest in buffer (UTC)</dt><dd>${latest}</dd></div></dl>`;
+}
+function setUtcInput(form, key, value) {
+  const utc = value ? new Date(value).toISOString() : '';
+  form.elements[`${key}_date`].value = utc.slice(0, 10);
+  form.elements[`${key}_time`].value = utc.slice(11, 19);
+}
+function readUtcInput(form, key, label) {
+  const date = form.elements[`${key}_date`].value;
+  const time = form.elements[`${key}_time`].value;
+  if (!date && !time) return null;
+  if (!date || !time) {
+    form.elements[`${key}_${date ? 'time' : 'date'}`].focus();
+    throw new Error(`${label}: enter both a date and a time in UTC, or leave both blank.`);
+  }
+  // Date and time fields supply wall-clock values; interpret them together in UTC.
+  return new Date(`${date}T${time}Z`).toISOString();
+}
 
 async function api(path, body) {
   const generation = state.authGeneration;
@@ -33,6 +93,7 @@ function showLogin(message = '') {
   state.authenticated = false;
   state.connected = false;
   state.instances = [];
+  renderSystem(null);
   state.busy.clear();
   state.target = null;
   state.editing = null;
@@ -41,6 +102,7 @@ function showLogin(message = '') {
   $('#overview').replaceChildren();
   $('#command-form').reset();
   $('#configuration-form').reset();
+  $('#password-form').reset();
   $('#configuration-outputs').replaceChildren();
   $('#notice').hidden = true;
   $('#dashboard').hidden = true;
@@ -107,6 +169,48 @@ $('#logout').addEventListener('click', async () => {
   } catch (error) { notify(`Could not sign out: ${error.message}`,true); }
   finally { $('#logout').disabled = false; }
 });
+$('#change-password').addEventListener('click', () => {
+  $('#password-form').reset();
+  $('#password-error').textContent = '';
+  $('#password-dialog').showModal();
+  $('#current-password').focus();
+});
+for (const button of document.querySelectorAll('[data-close-password]')) {
+  button.addEventListener('click', () => $('#password-dialog').close());
+}
+$('#password-dialog').addEventListener('close', () => $('#password-form').reset());
+$('#password-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.target;
+  const submit = $('button[type=submit]', form);
+  if (submit.disabled) return;
+  $('#password-error').textContent = '';
+  if (form.elements.new_password.value !== form.elements.confirm_password.value) {
+    $('#password-error').textContent = 'New passwords do not match.';
+    $('#confirm-password').focus();
+    return;
+  }
+  submit.disabled = true;
+  submit.textContent = 'Saving…';
+  try {
+    const session = await api('/api/auth/password', {
+      current_password: form.elements.current_password.value,
+      new_password: form.elements.new_password.value,
+      confirm_password: form.elements.confirm_password.value
+    });
+    signedIn(session);
+    $('#password-dialog').close();
+    notify('Password changed. Other browser sessions have been signed out.');
+    await refresh();
+  } catch (error) {
+    $('#password-error').textContent = error.message;
+    $('#current-password').value = '';
+    $('#current-password').focus();
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Save password';
+  }
+});
 async function restoreSession() {
   try {
     const session = await api('/api/auth/session');
@@ -144,7 +248,8 @@ function render() {
   $('#instances').innerHTML = state.instances.map(instance => {
     const running = instance.pid !== null;
     const disabled = state.busy.has(instance.name) ? 'disabled' : '';
-    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Buffer ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</div></div><div class="instance-buttons"><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></div>
+    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Retention ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</div></div><div class="instance-buttons"><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></div>
+      ${bufferSummary(instance)}
       <div class="table-scroll"><table><thead><tr><th>Output</th><th>Status</th><th>Recorded position / buffer</th><th>Traffic</th><th>Output controls</th></tr></thead><tbody>${instance.outputs.map(o => outputRow(instance,o)).join('')}</tbody></table></div>
       ${instance.pending.length ? `<div class="queue">Command queue: ${instance.pending.map(c => `#${c.id} ${escapeHTML(c.action)} → output ${c.pathnumber}`).join(' · ')}</div>` : ''}
       <details ${openLogs.has(instance.name) ? 'open' : ''}><summary>Recent operational messages</summary><div class="logs">${instance.logs.map(log => `${timeText(log.timestamp)} ${escapeHTML(log.text)}`).join('\n') || 'No messages yet.'}</div></details></section>`;
@@ -163,14 +268,16 @@ async function refresh() {
     if (!state.authenticated || generation !== state.authGeneration) return;
     state.instances = result.instances;
     state.connected = true;
+    renderSystem(result.system);
     $('#add-instance').disabled = false;
     document.body.classList.remove('disconnected');
-    $('#connection').textContent = `● Connected · ${new Date(result.sampled_at).toLocaleTimeString('en-GB')}`;
+    $('#connection').textContent = `● Connected · ${new Date(result.sampled_at).toISOString().slice(11, 19)} UTC`;
     $('#connection').className = 'online';
     render();
   } catch (error) {
     if (!state.authenticated || generation !== state.authGeneration) return;
     state.connected = false;
+    renderSystem(null, true);
     $('#add-instance').disabled = true;
     document.body.classList.add('disconnected');
     $('#connection').textContent = `Status unavailable · ${error.message}`;
@@ -207,15 +314,16 @@ $('#instances').addEventListener('click', async event => {
     const form = $('#command-form');
     form.reset();
     $('#target-name').textContent = `${name} / #${path} ${output.name}`;
-    $('#dialog-title').textContent = action === 'jump' ? 'Jump to recorded time' : 'Set stop time';
-    $('#command-help').textContent = action === 'jump' ? `Available: ${timeText(output.status.startpos)} – ${timeText(output.status.lastpos)}` : 'The output pauses at the selected wall-clock time. Leave blank to clear the stop time.';
+    $('#dialog-title').textContent = action === 'jump' ? 'Jump to recorded time (UTC)' : 'Set stop time (UTC)';
+    $('#command-help').textContent = action === 'jump' ? `Available: ${timeText(output.status.startpos)} – ${timeText(output.status.lastpos)}` : 'The output pauses at the selected wall-clock time in UTC. Leave both date and time blank to clear the stop time.';
     $('#jump-field').hidden = action !== 'jump';
     $('#schedule-field').hidden = action !== 'jump';
-    form.elements.jumptopos.required = action === 'jump';
-    form.elements.jumptopos.min = localInput(output.status.startpos);
-    form.elements.jumptopos.max = localInput(output.status.lastpos);
-    form.elements.jumptopos.value = action === 'jump' ? localInput(output.status.currpos || output.status.startpos) : '';
-    form.elements.playto.value = localInput(output.status.playto);
+    form.elements.jumptopos_date.required = action === 'jump';
+    form.elements.jumptopos_time.required = action === 'jump';
+    form.elements.jumptopos_date.min = output.status.startpos?.slice(0, 10) || '';
+    form.elements.jumptopos_date.max = output.status.lastpos?.slice(0, 10) || '';
+    setUtcInput(form, 'jumptopos', action === 'jump' ? output.status.currpos || output.status.startpos : null);
+    setUtcInput(form, 'playto', output.status.playto);
     $('#form-error').textContent = '';
     $('#command-dialog').showModal();
     return;
@@ -226,14 +334,22 @@ $('#command-form').addEventListener('submit', async event => {
   event.preventDefault();
   const target = state.target;
   const form = event.target;
-  const body = {action: target.action};
-  for (const key of ['jumptopos','startplayat','playto']) {
-    const value = form.elements[key].value;
-    if (value && (target.action === 'jump' || key === 'playto')) body[key] = new Date(value).toISOString();
-  }
   const submit = $('button[type=submit]',form);
   submit.disabled = true;
   try {
+    const body = {action: target.action};
+    for (const [key,label] of [['jumptopos','Recorded time'],['startplayat','Start playback at'],['playto','Stop at wall-clock time']]) {
+      if (target.action !== 'jump' && key !== 'playto') continue;
+      const value = readUtcInput(form, key, label);
+      if (value) body[key] = value;
+    }
+    if (target.action === 'jump') {
+      const status = state.instances.find(i => i.name === target.name).outputs.find(o => o.pathnumber === target.path).status;
+      const position = Date.parse(body.jumptopos);
+      if (position < Date.parse(status.startpos) || position > Date.parse(status.lastpos)) {
+        throw new Error('Recorded time must be within the available buffer (UTC).');
+      }
+    }
     await send(target.name,target.path,body);
     $('#command-dialog').close();
   } catch (error) { $('#form-error').textContent = error.message; }

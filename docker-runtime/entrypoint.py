@@ -3,10 +3,9 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import json
 import ipaddress
 import socket
-from web_auth import AUTH_FILE, make_credentials
+from web_auth import initialize_credentials
 
 username = os.environ.get("WEB_USERNAME", "admin")
 password = os.environ.get("WEB_PASSWORD", "")
@@ -29,10 +28,7 @@ if multicast_interface:
         raise SystemExit(f"Invalid DELAYER_MULTICAST_INTERFACE: {error}")
 for directory in ("/run/delayer", "/run/delayerd", "/home/video"):
     Path(directory).mkdir(parents=True, exist_ok=True)
-auth_file = Path(AUTH_FILE)
-auth_file.touch(mode=0o600, exist_ok=True)
-auth_file.chmod(0o600)
-auth_file.write_text(json.dumps(make_credentials(username, password)))
+initialize_credentials(username, password)
 unix_socket = os.environ.get("WEB_UNIX_SOCKET")
 if unix_socket and unix_socket != "/run/delayer-web/nginx.sock":
     raise SystemExit("WEB_UNIX_SOCKET must be /run/delayer-web/nginx.sock")

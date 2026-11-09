@@ -117,6 +117,16 @@ try:
     assert request('/api/instances/not-managed/start',{})[0] == 404
     wait_for(lambda: status()['process_state']=='running' and status('st2')['process_state']=='running','two ready instances')
     initial = {name:status(name)['pid'] for name in ['st1','st2']}
+    wait_for(lambda: all(request('/api/status')[1]['system'].values()), 'system resource samples')
+    system = request('/api/status')[1]['system']
+    disk = os.statvfs(system['storage']['path'])
+    assert system['storage']['path'] == '/home/video'
+    assert system['storage']['total_bytes'] == disk.f_blocks * disk.f_frsize
+    assert 0 <= system['storage']['available_bytes'] <= system['storage']['total_bytes']
+    assert 0 <= system['cpu']['usage_percent'] <= 100
+    assert system['network']['rx_bps'] >= 0 and system['network']['tx_bps'] >= 0
+    assert 'lo' not in system['network']['interfaces']
+    print('PASS live recording storage, CPU and network rates through authenticated status API',flush=True)
     wait_for(lambda: all(receiver.count()>30 for receiver in receivers),'live traffic on all three outputs')
     assert len(receivers[0].packets[-1][1]) == 1328
     assert len(receivers[1].packets[-1][1]) == 1316

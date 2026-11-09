@@ -31,5 +31,5 @@ class Client:
             return response.status, json.loads(data) if response.headers.get_content_type() == 'application/json' else data
 
     def login(self):
-        code, data = self.request('/api/auth/login', {'username':'admin','password':os.environ['WEB_PASSWORD']})
+        code, data = self.request('/api/auth/login', {'username':'admin','password':os.environ.get('TEST_LOGIN_PASSWORD',os.environ['WEB_PASSWORD'])})
         assert code==200 and data['authenticated'], (code,data)

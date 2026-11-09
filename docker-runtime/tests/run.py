@@ -46,6 +46,7 @@ with tempfile.TemporaryDirectory(prefix='delayer-test-') as temporary:
         print('PASS invalid and unavailable multicast interfaces rejected at startup')
         compose('exec','-T','delayer','python3','-m','unittest','discover','-s','/tests','-p','test_*.py','-v')
         compose('exec','-T','delayer','python3','/tests/integration.py')
+        compose('exec','-T','delayer','python3','/tests/password_change.py','change')
         # A second runtime against the same streams must fail ownership acquisition.
         network = project+'_default'
         original = compose('ps','-q','delayer',capture_output=True,text=True).stdout.strip()
@@ -66,7 +67,10 @@ with tempfile.TemporaryDirectory(prefix='delayer-test-') as temporary:
         else:
             raise AssertionError('Runtime did not recover after container restart')
         print('PASS clean container stop/restart with persistent recording volume')
-        compose('exec','-T','delayer','python3','/tests/verify_persistence.py')
+        compose('exec','-T','-e','TEST_LOGIN_PASSWORD=rotated-test-password','delayer','python3','/tests/verify_persistence.py')
+        compose('exec','-T','delayer','python3','/tests/password_change.py','verify')
+        compose('up','-d','--no-deps','--no-build','--force-recreate','--wait','delayer','web')
+        compose('exec','-T','delayer','python3','/tests/password_change.py','verify')
         print('All Docker integration checks passed.')
     except BaseException:
         compose('logs','--tail','100')

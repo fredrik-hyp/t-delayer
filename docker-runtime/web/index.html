@@ -8,7 +8,7 @@
   <script src="/app.js" defer></script>
 </head>
 <body class="signed-out">
-  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Control room</span></div></div><div class="session-tools"><div id="connection" role="status" hidden>Connecting…</div><div id="user-menu" hidden><span id="session-user"></span><button id="logout" type="button">Sign out</button></div></div></header>
+  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Control room</span></div></div><div class="session-tools"><div id="connection" role="status" hidden>Connecting…</div><div id="user-menu" hidden><span id="session-user"></span><button id="change-password" type="button">Change password</button><button id="logout" type="button">Sign out</button></div></div></header>
   <main id="login-view" class="login-view">
     <section class="login-card" aria-labelledby="login-title">
       <p class="eyebrow">T-DELAYER / CONTROL ROOM</p>
@@ -27,17 +27,50 @@
   </main>
   <main id="dashboard" hidden>
     <div class="intro"><div><p class="eyebrow">MULTICAST / OPERATIONS</p><h1>Streams under control.</h1><p>Live status and independent playback for every output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><button id="add-instance" class="primary" disabled>New instance</button></div></div>
+    <section class="system-panel" aria-label="System resources">
+      <div class="system-heading"><span>System resources</span><span id="system-status" role="status">Waiting for status…</span></div>
+      <dl class="system-metrics">
+        <div><dt>Recording storage · available</dt><dd><span id="storage-value">—</span><div class="resource-track" id="storage-meter" role="meter" aria-label="Storage used or reserved" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Unavailable"><span></span></div><small id="storage-detail">Recording filesystem</small></dd></div>
+        <div><dt>CPU usage</dt><dd><span id="cpu-value">—</span><div class="resource-track" id="cpu-meter" role="meter" aria-label="System CPU usage" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Unavailable"><span></span></div><small id="cpu-detail">Across all system CPUs</small></dd></div>
+        <div><dt>Network traffic</dt><dd><div class="network-values"><span><small>↓ In</small><span id="network-in">—</span></span><span><small>↑ Out</small><span id="network-out">—</span></span></div><small id="network-detail">All network interfaces · excluding loopback</small></dd></div>
+      </dl>
+    </section>
     <div id="notice" role="status" aria-live="polite" hidden></div>
     <div id="instances"><p class="empty">Loading instances…</p></div>
   </main>
-  <footer id="dashboard-footer" hidden>Status refreshes every two seconds. Times are shown in your local time zone: <span id="timezone"></span>. Recording continues when an output is paused.</footer>
+  <footer id="dashboard-footer" hidden>All times are shown and entered in UTC. Status refreshes every two seconds. Recording continues when an output is paused.</footer>
+  <dialog id="password-dialog" aria-labelledby="password-title">
+    <form id="password-form">
+      <div class="dialog-heading"><div><p class="eyebrow">ACCOUNT</p><h2 id="password-title">Change password</h2></div><button type="button" data-close-password class="close" aria-label="Close password settings">×</button></div>
+      <p>Other browser sessions will be signed out. This session stays signed in.</p>
+      <label for="current-password">Current password</label>
+      <input id="current-password" name="current_password" type="password" autocomplete="current-password" maxlength="1024" required>
+      <label for="new-password">New password</label>
+      <input id="new-password" name="new_password" type="password" autocomplete="new-password" minlength="8" maxlength="1024" required aria-describedby="password-help">
+      <small id="password-help">Use at least 8 characters.</small>
+      <label for="confirm-password">Confirm new password</label>
+      <input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="1024" required>
+      <p class="form-error" id="password-error" role="alert"></p>
+      <div class="dialog-actions"><button type="button" data-close-password>Cancel</button><button type="submit" class="primary">Save password</button></div>
+    </form>
+  </dialog>
   <dialog id="command-dialog">
     <form id="command-form">
       <div class="dialog-heading"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Control output</h2></div><button type="button" class="close" aria-label="Close">×</button></div>
+      <p>All times below are in UTC.</p>
       <p id="command-help"></p>
-      <label id="jump-field">Recorded time<input type="datetime-local" name="jumptopos" step="1"></label>
-      <label id="schedule-field">Start playback at (optional)<input type="datetime-local" name="startplayat" step="1"><small>Leave blank to jump to the position and pause. Select Play to resume.</small></label>
-      <label id="end-field">Stop at wall-clock time (optional)<input type="datetime-local" name="playto" step="1"><small>Leave blank to clear any stop time.</small></label>
+      <fieldset id="jump-field" class="utc-date-time"><legend>Recorded time (UTC)</legend><div class="date-time-fields">
+        <label>Date<input type="date" name="jumptopos_date" aria-label="Recorded date (UTC)"></label>
+        <label>Time (UTC)<input type="time" name="jumptopos_time" aria-label="Recorded time of day (UTC)" step="1"></label>
+      </div></fieldset>
+      <fieldset id="schedule-field" class="utc-date-time"><legend>Start playback at (UTC, optional)</legend><div class="date-time-fields">
+        <label>Date<input type="date" name="startplayat_date" aria-label="Playback start date (UTC)"></label>
+        <label>Time (UTC)<input type="time" name="startplayat_time" aria-label="Playback start time (UTC)" step="1"></label>
+      </div><small>Leave both fields blank to jump to the position and pause. Select Play to resume.</small></fieldset>
+      <fieldset id="end-field" class="utc-date-time"><legend>Stop at wall-clock time (UTC, optional)</legend><div class="date-time-fields">
+        <label>Date<input type="date" name="playto_date" aria-label="Stop date (UTC)"></label>
+        <label>Time (UTC)<input type="time" name="playto_time" aria-label="Stop time (UTC)" step="1"></label>
+      </div><small>Leave both fields blank to clear any stop time.</small></fieldset>
       <p class="form-error" id="form-error" role="alert"></p>
       <div class="dialog-actions"><button type="button" class="cancel">Cancel</button><button type="submit" class="primary">Send command</button></div>
     </form>

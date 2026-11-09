@@ -34,6 +34,7 @@ services:
     volumes:
       - ${DELAYER_INSTANCES_FILE:-./docker-runtime/instances.json}:/etc/delayer/instances.json:ro
       - video:/home/video
+      - web-auth:/var/lib/delayer
     ports:
       - '${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080'
     depends_on:
@@ -44,3 +45,4 @@ services:
 volumes:
   database:
   video:
+  web-auth:

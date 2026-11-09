@@ -25,6 +25,7 @@ import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from web_auth import AuthError, Sessions
+from system_metrics import SystemMetrics
 
 LOG = logging.getLogger("delayer-control")
 SOCKET = "/run/delayer/control.sock"
@@ -461,10 +462,22 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
             if not authenticated:
                 raise APIError(401, "Sign in to open the control room")
+            if post and self.path == "/api/auth/password":
+                body = self.request_json()
+                if set(body) != {"current_password", "new_password", "confirm_password"}:
+                    raise APIError(400, "Provide the current password, new password and confirmation")
+                token = manager.auth.change_password(cookie, body["current_password"], body["new_password"],
+                                                      body["confirm_password"], self.headers.get("X-Real-IP", "local"))
+                self.respond(200, {"changed": True, "authenticated": True, "username": manager.auth.username}, manager.auth.cookie(token))
+                return
             if not post and self.path == "/api/status":
                 with database() as cur:
                     instances = [item.snapshot(cur) for item in manager.list_instances()]
-                self.respond(200, {"sampled_at": datetime.now(timezone.utc), "instances": instances})
+                    cur.execute("SELECT video_path FROM systeminfo LIMIT 1")
+                    storage = cur.fetchone()
+                metrics = manager.system_metrics.sample(storage["video_path"] if storage else "")
+                self.respond(200, {"sampled_at": datetime.now(timezone.utc), "instances": instances,
+                                   "system": metrics})
                 return
             match = re.fullmatch(r"/api/instances/([A-Za-z0-9_.-]+)/(start|stop|configuration|outputs/(\d+)/commands)", self.path)
             creating = self.path == "/api/instances"
@@ -518,6 +531,7 @@ class Manager:
         self.nginx = None
         self.http = None
         self.shutdown = threading.Event()
+        self.system_metrics = SystemMetrics()
 
     def list_instances(self):
         with self.lock:

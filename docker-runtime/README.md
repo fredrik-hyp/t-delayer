@@ -52,10 +52,19 @@ Webbport, databasanslutning och andra tjänsters routing påverkas inte.
 Webbkontrollen har en integrerad inloggningssida och en knapp för utloggning.
 Användaren loggar in med `WEB_USERNAME` (standard `admin`) och `WEB_PASSWORD`.
 `WEB_PASSWORD_FILE` kan peka på en monterad Docker secret i stället. Lösenordet
-hashas vid start med PBKDF2; webbläsaren får en slumpad sessionscookie med
+används endast för att skapa kontot vid första start. Därefter används den
+sparade PBKDF2-hashen i `web-auth`-volymen (`/var/lib/delayer/auth.json`), även
+om containern återskapas. Webbläsaren får en slumpad sessionscookie med
 `HttpOnly`, `SameSite=Strict` och åtta timmars giltighet. Utloggning återkallar
 sessionen direkt. Efter containeromstart behöver användaren logga in på nytt.
-Misslyckade inloggningsförsök begränsas per klientadress.
+Misslyckade lösenordsförsök begränsas per klientadress.
+
+Välj **Change password** bredvid **Sign out** för att byta lösenord. Ange
+nuvarande lösenord och det nya lösenordet två gånger (minst åtta tecken).
+Bytet sparar endast en saltad hash, återkallar alla gamla sessionscookies och
+ger den aktuella webbläsaren en ny session. Delayerprocesser och outputs
+påverkas inte. Ta med `web-auth`-volymen i backup; `WEB_PASSWORD` skriver
+inte över ett lösenord som ändrats i UI:t.
 
 Använd HTTPS via din vanliga reverse proxy vid åtkomst över nätverk. Sätt då
 `WEB_COOKIE_SECURE=1` så att sessionscookien bara skickas över HTTPS. API:t
@@ -119,6 +128,18 @@ schemalagda tider, kommandokö och de senaste driftmeddelandena. Trafikvärdena 
 C-programmets befintliga medelvärden. Outputkontroller väntar på inspelad data och stängs av om statistikens
 tidsstämpel är äldre än tio sekunder eller statusanslutningen försvinner.
 
+Ovanför instanslistan visas även ledigt lagringsutrymme på inspelningskatalogens
+filsystem (databasens `video_path`), CPU-belastning i procent över alla systemets
+CPU:er och nätverkstrafik in/ut i Mbit/s. Lagringen visar utrymme som faktiskt är
+tillgängligt för skrivning, exklusive reserverade block. CPU och nätverk räknas
+från skillnaden mellan två Linux `/proc`-mätningar; första uppdateringen väntar
+därför på ett andra prov. Loopback räknas inte med i nätverkstrafiken. CPU gäller
+hela systemet som syns i `/proc/stat`, inte enbart delayerprocesserna eller
+containerns CPU-kvot. Nätverk gäller containerns synliga nätverkskort: i bridge-läge
+containerns trafik och med host networking hostens trafik. Mätningarna delas
+mellan anslutna webbläsare. Om ett mätvärde eller statusanslutningen saknas visas
+ett streck i stället för att gamla värden fortsätter visas som aktuella.
+
 Varje output kan oberoende:
 
 - **Pause:** stoppa utskick och behålla uppspelningspositionen.
@@ -129,8 +150,9 @@ Varje output kan oberoende:
 
 Detta är befintliga `jump`, `play`, `pause`, `playto`-semantiken. `playto` är ett
 **verkligt klockslag**, inte en position i inspelningen. Ett vanligt `play` utan
-sluttid tar också bort tidigare sluttid. UI:t visar lokala tider och API:t kräver
-ISO 8601 med tidszon. Databasen och C-processernas libpq-sessioner kör UTC.
+sluttid tar också bort tidigare sluttid. Alla tider i UI:t visas och anges i UTC,
+inklusive dialogernas separata datum- och klockslagsfält. API:t kräver ISO 8601 med tidszon. Databasen
+och C-processernas libpq-sessioner kör UTC.
 
 Skrivningar returnerar `202 accepted` med kommando-ID efter att raden har
 committats i `delayercoms`. Det betyder köat, inte garanterat verkställt; följ

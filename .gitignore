@@ -4,3 +4,4 @@
 docker-runtime/instances.json
 __pycache__/
 *.pyc
+build-artifacts/

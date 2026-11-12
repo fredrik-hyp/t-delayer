@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    install|upgrade)
+        . /etc/os-release
+        case "$ID:$VERSION_ID:$(dpkg --print-architecture)" in
+            ubuntu:@UBUNTU@:amd64) ;;
+            *) echo "This package requires Ubuntu @UBUNTU@ on amd64." >&2; exit 1 ;;
+        esac
+        ;;
+esac

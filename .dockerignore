@@ -6,6 +6,7 @@
 **/*.o
 build-artifacts
 pov-delayer2/tools/create_package
+packaging/tests
 pov-delayer2/.player-build
 pov-delayer2/delayer
 pov-delayer2/recorder

@@ -1,0 +1,19 @@
+[Unit]
+Description=T-Delayer, PostgreSQL, and web UI in Docker
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+PartOf=docker.service
+RequiresMountsFor=/var/lib/t-delayer
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/t-delayerctl start
+ExecStop=/usr/sbin/t-delayerctl stop
+TimeoutStartSec=300
+TimeoutStopSec=100
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

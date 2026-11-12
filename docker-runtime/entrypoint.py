@@ -34,7 +34,13 @@ if unix_socket and unix_socket != "/run/delayer-web/nginx.sock":
     raise SystemExit("WEB_UNIX_SOCKET must be /run/delayer-web/nginx.sock")
 if unix_socket:
     Path(unix_socket).parent.mkdir(parents=True, exist_ok=True)
-listen = "unix:" + unix_socket if unix_socket else str(port)
+bind = os.environ.get("WEB_BIND", "")
+if bind:
+    try:
+        ipaddress.IPv4Address(bind)
+    except ValueError:
+        raise SystemExit("WEB_BIND must be an IPv4 address")
+listen = "unix:" + unix_socket if unix_socket else (f"{bind}:{port}" if bind else str(port))
 template = Path("/opt/delayer/nginx.conf.template").read_text()
 Path("/etc/nginx/nginx.conf").write_text(template.replace("${WEB_LISTEN}", listen))
 subprocess.run(["nginx", "-t"], check=True)

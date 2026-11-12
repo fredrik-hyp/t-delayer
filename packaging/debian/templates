@@ -1,0 +1,52 @@
+Template: t-delayer-docker/network-mode
+Type: select
+Choices: host, bridge, existing
+Default: host
+Description: Docker network type for the delayer container:
+ Host is recommended for multicast on a physical Linux network. Bridge is
+ suitable for UI tests and multicast between containers on the same bridge.
+ Existing uses a pre-created user-defined bridge, macvlan, or ipvlan network.
+ PostgreSQL, delayer, and the UI run together in one container.
+
+Template: t-delayer-docker/network-name
+Type: string
+Description: Existing Docker network name:
+ Create this network before completing installation. Supported drivers are
+ bridge, macvlan, and ipvlan. The package never removes this network.
+
+Template: t-delayer-docker/container-ip
+Type: string
+Description: Static container IPv4 address (optional):
+ Only used with an existing network. Leave empty for Docker IP allocation.
+ The address must belong to the existing network and be reserved outside DHCP.
+
+Template: t-delayer-docker/web-bind
+Type: string
+Default: 127.0.0.1
+Description: Web UI bind address (web-bind):
+ Enter 127.0.0.1 for access from this host only, 0.0.0.0 for all IPv4
+ interfaces, or a specific local IPv4 address for one host interface.
+ Host and bridge modes use this host address. The default is 127.0.0.1.
+ With an existing macvlan or ipvlan network, this must be 0.0.0.0 and the UI
+ is accessed directly at the container address. Use HTTPS for remote access.
+
+Template: t-delayer-docker/web-port
+Type: string
+Default: 8080
+Description: Web UI TCP port:
+ Choose an unused port from 1 to 65535. The default is 8080.
+
+Template: t-delayer-docker/multicast-interface
+Type: string
+Description: Local multicast interface IPv4 address (optional):
+ Leave empty to use the routing table. In host mode, enter the host NIC's
+ IPv4 address. With macvlan or ipvlan, enter the container's IPv4 address.
+ Do not enter a multicast group or an interface name such as eth0.
+
+Template: t-delayer-docker/video-path
+Type: string
+Default: /var/lib/t-delayer/video
+Description: Absolute host directory for recorded video:
+ Use a dedicated mounted disk for substantial recordings. The directory is
+ mounted at /home/video in the container. Existing recordings are not moved
+ when this setting changes. Database and login data stay in /var/lib/t-delayer.

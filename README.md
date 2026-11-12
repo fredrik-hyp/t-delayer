@@ -3,6 +3,20 @@ This is a disk based delayer that can store hours of material and output it a la
 
 It is based on Ubuntu 22.04.
 
+## Docker Debian packages (Ubuntu 24.04 / 26.04, amd64)
+
+Build a `.deb` that runs PostgreSQL, delayer, nginx, and the English web UI in
+one container, with interactive network selection and persistent host storage:
+
+```sh
+./packaging/build-deb.sh --ubuntu all --version 4.1.2
+```
+
+See the [installation and administration manual](packaging/INSTALL.md) for host
+requirements, installation, network choices, reconfiguration, and backups.
+This packaging route is independent of the legacy native packages below and
+the development Docker Compose stack.
+
 ## Docker med webbkontroll
 
 Kör en eller flera delayerinstanser per container med nginx och ett webbgränssnitt

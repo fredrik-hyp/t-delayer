@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop t-delayer-docker.service
+            systemctl disable t-delayer-docker.service
+        fi
+        /usr/sbin/t-delayerctl remove-containers
+        ;;
+esac

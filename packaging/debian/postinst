@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+. /usr/share/debconf/confmodule
+case "$1" in
+    configure)
+        for field in network-mode network-name container-ip web-bind web-port multicast-interface video-path; do
+            db_get "t-delayer-docker/$field"
+            case "$field" in
+                network-mode) export DELAYER_NETWORK_MODE="$RET" ;;
+                network-name) export DELAYER_NETWORK_NAME="$RET" ;;
+                container-ip) export DELAYER_CONTAINER_IP="$RET" ;;
+                web-bind) export DELAYER_WEB_BIND="$RET" ;;
+                web-port) export DELAYER_WEB_PORT="$RET" ;;
+                multicast-interface) export DELAYER_MULTICAST_INTERFACE="$RET" ;;
+                video-path) export DELAYER_VIDEO_PATH="$RET" ;;
+            esac
+        done
+        db_stop
+        systemctl start docker.service
+        /usr/sbin/t-delayerctl load-images
+        /usr/sbin/t-delayerctl configure
+        systemctl daemon-reload
+        /usr/sbin/t-delayerctl validate
+        systemctl enable t-delayer-docker.service
+        systemctl restart t-delayer-docker.service
+        echo "T-Delayer is installed. Run 'sudo t-delayerctl credentials' for the initial UI login."
+        echo "Manual: /usr/share/doc/t-delayer-docker/INSTALL.md"
+        ;;
+esac

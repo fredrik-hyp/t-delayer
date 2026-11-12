@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+db_input high t-delayer-docker/network-mode || true
+db_go
+db_get t-delayer-docker/network-mode
+MODE=$RET
+if [ "$MODE" = existing ]; then
+    db_input high t-delayer-docker/network-name || true
+    db_input high t-delayer-docker/container-ip || true
+fi
+# Access to the UI is an essential install choice, even at critical priority.
+# Keep debconf's seen flag intact: APT can run config twice during one install.
+db_input critical t-delayer-docker/web-bind || true
+db_go
+db_input high t-delayer-docker/web-port || true
+db_input high t-delayer-docker/multicast-interface || true
+db_input high t-delayer-docker/video-path || true
+db_go

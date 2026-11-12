@@ -1,4 +1,5 @@
-FROM ubuntu:26.04 AS build
+ARG UBUNTU_VERSION=26.04
+FROM ubuntu:${UBUNTU_VERSION} AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -9,7 +10,7 @@ COPY pov-delayer2/ pov-delayer2/
 RUN cd pov-delayer2 && ./make.sh -d && test -x delayer && ./make.sh -f \
     && cd tools/read_chunk_file && ./make.sh && test -x read_chunk_file
 
-FROM ubuntu:26.04
+FROM ubuntu:${UBUNTU_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     PGHOST=database PGPORT=5432 PGDATABASE=delayerdb PGUSER=delayer PGCONNECT_TIMEOUT=5 PGTZ=UTC \
     WEB_PORT=8080 WEB_USERNAME=admin DELAYER_CONFIG=/etc/delayer/instances.json

@@ -1,0 +1,11 @@
+Package: t-delayer-docker
+Version: @VERSION@
+Section: video
+Priority: optional
+Architecture: amd64
+Depends: debconf (>= 1.5), python3, systemd, docker.io | docker-ce
+Maintainer: Fredrik Nilsson <fredrik@polylegio.se>
+Description: Disk-based multicast delayer with a web UI in Docker
+ Installs a bundled amd64 Docker image with a persistent PostgreSQL database,
+ an authenticated web UI, and systemd lifecycle management.
+ Configure host, bridge, or an existing Docker network using debconf.

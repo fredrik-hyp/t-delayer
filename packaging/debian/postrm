@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+if [ "$1" = purge ]; then
+    if [ -f /usr/share/debconf/confmodule ]; then
+        . /usr/share/debconf/confmodule
+        db_purge
+    fi
+    rm -f /etc/t-delayer/config.json
+    rm -f /etc/systemd/system/t-delayer-docker.service.d/storage.conf
+    rmdir /etc/systemd/system/t-delayer-docker.service.d 2>/dev/null || true
+    rmdir /etc/t-delayer 2>/dev/null || true
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+fi
+# Never delete recordings, database credentials, PostgreSQL data, login data, or images.

@@ -3,15 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>T-Delayer · Control room</title>
+  <meta name="color-scheme" content="dark">
+  <title>Polylegio Delayer · Operations</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body class="signed-out">
-  <header><div class="brand"><span class="mark">T</span><div><strong>T-DELAYER</strong><span>Control room</span></div></div><div class="session-tools"><div id="connection" role="status" hidden>Connecting…</div><div id="user-menu" hidden><span id="session-user"></span><button id="change-password" type="button">Change password</button><button id="logout" type="button">Sign out</button></div></div></header>
+  <a class="skip-link" href="#dashboard">Skip to control room</a>
+  <header class="app-header">
+    <div class="brand-lockup" aria-label="Polylegio Delayer"><span class="brand-mark" aria-hidden="true">PL</span><span class="brand-name">Polylegio <strong>Delayer</strong></span></div>
+    <div class="header-status"><span id="connection" class="connection-pill" role="status" hidden>Connecting…</span><time class="utc-clock" id="utc-clock" aria-label="Current UTC time"></time></div>
+    <div id="user-menu" class="header-actions" hidden>
+      <button id="density-toggle" class="quiet-button" type="button" aria-label="Toggle compact density" aria-pressed="false">↕ <span class="button-label">Compact</span></button>
+      <button id="notifications-button" class="quiet-button notification-button" type="button" aria-label="Open activity panel" aria-haspopup="dialog" aria-expanded="false" aria-controls="notification-drawer">◌ <span class="button-label">Activity</span> <span id="notification-count" class="count-badge">0</span></button>
+      <span id="session-user"></span>
+      <button id="change-password" class="quiet-button" type="button" aria-label="Change password">⌁ <span class="button-label">Password</span></button>
+      <button id="logout" class="quiet-button" type="button" aria-label="Sign out">↪ <span class="button-label">Sign out</span></button>
+    </div>
+  </header>
   <main id="login-view" class="login-view">
     <section class="login-card" aria-labelledby="login-title">
-      <p class="eyebrow">T-DELAYER / CONTROL ROOM</p>
+      <p class="eyebrow">POLYLEGIO DELAYER / CONTROL ROOM</p>
       <h1 id="login-title">Sign in</h1>
       <p>Manage your streams, outputs and playback.</p>
       <form id="login-form" action="/api/auth/login" method="post">
@@ -25,23 +37,58 @@
       <noscript>Enable JavaScript to use the control room.</noscript>
     </section>
   </main>
-  <main id="dashboard" hidden>
-    <div class="intro"><div><p class="eyebrow">MULTICAST / OPERATIONS</p><h1>Streams under control.</h1><p>Live status and independent playback for every output.</p></div><div class="overview-panel"><div id="overview" class="overview"></div><div class="actions"><button id="export-all" disabled>Export all JSON</button><button id="import-all" disabled>Import JSON</button><button id="add-instance" class="primary" disabled>New instance</button></div></div></div>
-    <section class="system-panel" aria-label="System resources">
-      <div class="system-heading"><span>System resources</span><span id="system-status" role="status">Waiting for status…</span></div>
-      <dl class="system-metrics">
-        <div><dt>Recording storage · available</dt><dd><span id="storage-value">—</span><div class="resource-track" id="storage-meter" role="meter" aria-label="Storage used or reserved" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Unavailable"><span></span></div><small id="storage-detail">Recording filesystem</small></dd></div>
-        <div><dt>CPU usage</dt><dd><span id="cpu-value">—</span><div class="resource-track" id="cpu-meter" role="meter" aria-label="System CPU usage" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Unavailable"><span></span></div><small id="cpu-detail">Across all system CPUs</small></dd></div>
-        <div><dt>Network traffic</dt><dd><div class="network-values"><span><small>↓ In</small><span id="network-in">—</span></span><span><small>↑ Out</small><span id="network-out">—</span></span></div><small id="network-detail">All network interfaces · excluding loopback</small></dd></div>
-      </dl>
+  <main id="dashboard" tabindex="-1" hidden>
+    <section class="page-intro" aria-labelledby="page-title"><h1 id="page-title">Operations</h1><div class="intro-actions"><button id="import-all" disabled>Import JSON</button><button id="export-all" disabled>Export all</button><button id="add-instance" class="primary" disabled>New instance</button></div></section>
+    <section class="health-strip" aria-label="System overview">
+      <article class="metric-card health-card"><span class="metric-label">System</span><strong id="health-value">Connecting…</strong><small id="health-detail">Waiting for status</small></article>
+      <article class="metric-card"><span class="metric-label">Instances</span><strong id="running-summary">—</strong><small>Running</small></article>
+      <article class="metric-card"><span class="metric-label">Outputs</span><strong id="output-summary">—</strong><small id="active-output-summary">Waiting for status</small></article>
+      <article class="metric-card"><span class="metric-label">Recording storage</span><strong id="storage-summary">—</strong><small id="storage-summary-detail">Available for recording</small></article>
+      <article class="metric-card"><span class="metric-label">Network</span><strong id="network-summary">—</strong><small>Mbit/s in / out</small></article>
     </section>
+    <nav class="cockpit-tabs" aria-label="Control room views" role="tablist">
+      <button id="tab-instances" role="tab" aria-selected="true" aria-controls="panel-instances" tabindex="0">Instances <span id="instance-tab-count" class="tab-count">0</span></button>
+      <button id="tab-activity" role="tab" aria-selected="false" aria-controls="panel-activity" tabindex="-1">Activity <span id="activity-tab-count" class="tab-count">0</span></button>
+      <button id="tab-resources" role="tab" aria-selected="false" aria-controls="panel-resources" tabindex="-1">Resources</button>
+      <button id="tab-configuration" role="tab" aria-selected="false" aria-controls="panel-configuration" tabindex="-1">Configuration</button>
+    </nav>
     <div id="notice" role="status" aria-live="polite" hidden></div>
-    <div id="instances"><p class="empty">Loading instances…</p></div>
+    <section id="panel-instances" class="tab-panel" role="tabpanel" aria-labelledby="tab-instances"><div class="view-toolbar"><span>Independent playback for every output</span><div class="view-switch" role="group" aria-label="Buffer visualization"><button type="button" data-buffer-view="timeline" aria-pressed="true">Timeline</button><button type="button" data-buffer-view="ring" aria-pressed="false">Ring buffer</button></div></div><div id="instances" class="instance-list"><p class="empty">Loading instances…</p></div></section>
+    <section id="panel-activity" class="tab-panel" role="tabpanel" aria-labelledby="tab-activity" hidden><article class="utility-panel"><div class="panel-heading"><div><p class="eyebrow">Operational history</p><h2>Recent activity</h2></div></div><ol id="activity-list" class="activity-list"></ol></article></section>
+    <section id="panel-resources" class="tab-panel" role="tabpanel" aria-labelledby="tab-resources" hidden>
+      <section class="system-panel" aria-label="System resources">
+        <p id="system-status" class="resource-status" role="status">Waiting for status…</p>
+        <div class="resource-grid">
+          <article class="utility-panel resource-card">
+            <div class="panel-heading"><div><p class="eyebrow">Storage</p><h2>Recording volume</h2></div><strong id="storage-value">—</strong></div>
+            <div class="resource-track" id="storage-meter" role="meter" aria-label="Storage used or reserved" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Unavailable"><span></span></div>
+            <p class="technical-copy">Available for recording</p><p id="storage-detail" class="technical-copy">Recording filesystem</p>
+          </article>
+          <article class="utility-panel resource-card">
+            <div class="panel-heading"><div><p class="eyebrow">Compute</p><h2>CPU usage</h2></div><strong id="cpu-value">—</strong></div>
+            <div class="resource-track" id="cpu-meter" role="meter" aria-label="System CPU usage" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Unavailable"><span></span></div>
+            <dl class="detail-list"><div><dt>Refresh</dt><dd>Every 2 seconds</dd></div><div><dt>Scope</dt><dd id="cpu-detail">Across all system CPUs</dd></div></dl>
+          </article>
+          <article class="utility-panel resource-card resource-wide">
+            <div class="panel-heading"><div><p class="eyebrow">Network</p><h2>Traffic and interfaces</h2></div></div>
+            <div class="traffic-pair"><div><span>↓ In</span><b id="network-in">—</b></div><div><span>↑ Out</span><b id="network-out">—</b></div></div>
+            <details><summary>Visible network interfaces</summary><p id="network-detail" class="technical-copy">All network interfaces · excluding loopback</p></details>
+          </article>
+        </div>
+      </section>
+    </section>
+    <section id="panel-configuration" class="tab-panel" role="tabpanel" aria-labelledby="tab-configuration" hidden><article class="utility-panel"><div class="panel-heading"><div><p class="eyebrow">Control room</p><h2>Configuration tools</h2></div></div><div class="configuration-grid">
+      <button type="button" data-global-action="new" disabled><span class="config-icon">＋</span><b>New instance</b><small>Create an input, retention window and outputs.</small></button>
+      <button type="button" data-global-action="import" disabled><span class="config-icon">⇣</span><b>Import JSON</b><small>Review and import instance configurations.</small></button>
+      <button type="button" data-global-action="export" disabled><span class="config-icon">⇡</span><b>Export all JSON</b><small>Download configuration for every instance.</small></button>
+      <button type="button" data-global-action="password"><span class="config-icon">⌁</span><b>Change password</b><small>Other browser sessions will be signed out.</small></button>
+    </div></article></section>
   </main>
   <footer id="dashboard-footer" hidden>All times are shown and entered in UTC. Status refreshes every two seconds. Recording continues when an output is paused.</footer>
+  <dialog id="notification-drawer" class="notification-drawer" aria-labelledby="notification-title"><div class="drawer-header"><div><p class="eyebrow">Live operations</p><h2 id="notification-title">Activity</h2></div><button class="icon-button" type="button" data-drawer-close aria-label="Close activity panel">×</button></div><ol id="notification-list" class="activity-list compact-list"></ol></dialog>
   <dialog id="password-dialog" aria-labelledby="password-title">
     <form id="password-form">
-      <div class="dialog-heading"><div><p class="eyebrow">ACCOUNT</p><h2 id="password-title">Change password</h2></div><button type="button" data-close-password class="close" aria-label="Close password settings">×</button></div>
+      <div class="dialog-heading dialog-header"><div><p class="eyebrow">ACCOUNT</p><h2 id="password-title">Change password</h2></div><button type="button" data-close-password class="close" aria-label="Close password settings">×</button></div><div class="dialog-body">
       <p>Other browser sessions will be signed out. This session stays signed in.</p>
       <label for="current-password">Current password</label>
       <input id="current-password" name="current_password" type="password" autocomplete="current-password" maxlength="1024" required>
@@ -51,12 +98,12 @@
       <label for="confirm-password">Confirm new password</label>
       <input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="1024" required>
       <p class="form-error" id="password-error" role="alert"></p>
-      <div class="dialog-actions"><button type="button" data-close-password>Cancel</button><button type="submit" class="primary">Save password</button></div>
+      </div><div class="dialog-actions dialog-footer"><button type="button" data-close-password>Cancel</button><button type="submit" class="primary">Save password</button></div>
     </form>
   </dialog>
-  <dialog id="command-dialog">
+  <dialog id="command-dialog" aria-labelledby="dialog-title" aria-describedby="command-help">
     <form id="command-form">
-      <div class="dialog-heading"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Control output</h2></div><button type="button" class="close" aria-label="Close">×</button></div>
+      <div class="dialog-heading dialog-header"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Control output</h2></div><button type="button" data-close-command class="close" aria-label="Close">×</button></div><div class="dialog-body">
       <p>All times below are in UTC.</p>
       <p id="command-help"></p>
       <fieldset id="jump-field" class="utc-date-time"><legend>Recorded time (UTC)</legend><div class="date-time-fields">
@@ -72,12 +119,12 @@
         <label>Time (UTC)<input type="time" name="playto_time" aria-label="Stop time (UTC)" step="1"></label>
       </div><small>Leave both fields blank to clear any stop time.</small></fieldset>
       <p class="form-error" id="form-error" role="alert"></p>
-      <div class="dialog-actions"><button type="button" class="cancel">Cancel</button><button type="submit" class="primary">Send command</button></div>
+      </div><div class="dialog-actions dialog-footer"><button type="button" data-close-command class="cancel">Cancel</button><button type="submit" class="primary">Send command</button></div>
     </form>
   </dialog>
-  <dialog id="configuration-dialog">
+  <dialog id="configuration-dialog" aria-labelledby="configuration-title">
     <form id="configuration-form">
-      <div class="dialog-heading"><div><p class="eyebrow">INPUT &amp; OUTPUTS</p><h2 id="configuration-title">New instance</h2></div><button type="button" data-close-config class="close" aria-label="Close configuration">×</button></div>
+      <div class="dialog-heading dialog-header"><div><p class="eyebrow">INPUT &amp; OUTPUTS</p><h2 id="configuration-title">New instance</h2></div><button type="button" data-close-config class="close" aria-label="Close configuration">×</button></div><div class="dialog-body">
       <p>Configuration is saved for the next instance start. Playback controls remain available during operation.</p>
       <div class="config-grid">
         <label>Instance name<input name="instance_name" required maxlength="40" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{0,39}" autocomplete="off"></label>
@@ -91,12 +138,12 @@
       <div class="outputs-heading"><h3>Outputs</h3><button type="button" id="add-output">Add output</button></div>
       <div id="configuration-outputs"></div>
       <p class="form-error" id="configuration-error" role="alert"></p>
-      <div class="dialog-actions"><button type="button" data-close-config>Cancel</button><button type="submit" class="primary">Save configuration</button></div>
+      </div><div class="dialog-actions dialog-footer"><button type="button" data-close-config>Cancel</button><button type="submit" class="primary">Save configuration</button></div>
     </form>
   </dialog>
   <dialog id="import-dialog" aria-labelledby="import-title">
     <form id="import-form">
-      <div class="dialog-heading"><div><p class="eyebrow">CONFIGURATION</p><h2 id="import-title">Import JSON</h2></div><button type="button" data-close-import class="close" aria-label="Close import">×</button></div>
+      <div class="dialog-heading dialog-header"><div><p class="eyebrow">CONFIGURATION</p><h2 id="import-title">Import JSON</h2></div><button type="button" data-close-import class="close" aria-label="Close import">×</button></div><div class="dialog-body">
       <p id="import-help"></p>
       <p>Existing instances with the same name will be updated and must be stopped. Other instances are kept. Importing does not start any processes; autostart applies at the next container start.</p>
       <label for="import-file">Load JSON file (up to 1 MiB)</label>
@@ -105,7 +152,7 @@
       <textarea id="import-json" rows="14" required spellcheck="false" aria-describedby="import-help import-preview"></textarea>
       <p id="import-preview" aria-live="polite"></p>
       <p class="form-error" id="import-error" role="alert"></p>
-      <div class="dialog-actions"><button type="button" data-close-import>Cancel</button><button type="submit" class="primary">Import configuration</button></div>
+      </div><div class="dialog-actions dialog-footer"><button type="button" data-close-import>Cancel</button><button type="submit" class="primary">Import configuration</button></div>
     </form>
   </dialog>
 </body>

@@ -59,7 +59,29 @@ om containern återskapas. Webbläsaren får en slumpad sessionscookie med
 sessionen direkt. Efter containeromstart behöver användaren logga in på nytt.
 Misslyckade lösenordsförsök begränsas per klientadress.
 
-Välj **Change password** bredvid **Sign out** för att byta lösenord. Ange
+Gränssnittet använder Polylegio Delayers Operations-layout med flikarna
+**Instances**, **Activity**, **Resources** och **Configuration**. Översiktskorten
+visar driftstatus, instanser, outputs, lagring och nätverk. **Compact** växlar
+täthet. **Activity** i sidhuvudet öppnar driftloggen i en sidopanel.
+
+Under **Instances** växlar **Timeline** och **Ring buffer** mellan de två
+buffertvyerna. Båda använder serverns rapporterade inspelningsgränser och
+uppspelningspositioner och uppdateras varannan sekund. Markörer väljer rätt
+output och öppnar **Jump / schedule**. När markörer överlappar i ringvyn kan
+alla outputs fortfarande väljas i listan. En överskriven position markeras
+**Expired**; **Recover** öppnar hoppdialogen med en giltig tid vid buffertens
+början. Kommandot följer samma jump/schedule-regler som övrig uppspelning.
+Vid inaktuell status eller anslutningsfel spärras uppspelningskommandon.
+Instansens gröna **Running**-märke växlar till rött **No input** när aktuell
+inputstatistik visar 0 bit/s. Märket och kortets vänsterrand blinkar rött i
+samma takt, en gång per sekund, och återgår
+automatiskt till grönt **Running** när trafiken kommer tillbaka. Webbläsarens
+inställning för minskad rörelse ger ett fast rött märke och en fast röd rand.
+Det gäller även om outputs fortfarande spelar upp från disk. Inputvärdet är
+ett medelvärde över fem sekunder; UI:t hämtar status varannan sekund. Saknad
+eller inaktuell statistik tolkas inte som bekräftad avsaknad av input.
+
+Välj **Password** bredvid **Sign out** för att byta lösenord. Ange
 nuvarande lösenord och det nya lösenordet två gånger (minst åtta tecken).
 Bytet sparar endast en saltad hash, återkallar alla gamla sessionscookies och
 ger den aktuella webbläsaren en ny session. Delayerprocesser och outputs

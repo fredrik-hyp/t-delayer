@@ -1,6 +1,8 @@
+import {classifyPlayback, formatDelay, buildMarkerLayout} from './buffer-model.js';
+
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, importing: null, authenticated: false, authGeneration: 0};
+const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, importing: null, authenticated: false, authGeneration: 0, bufferView: 'timeline', selectedOutputs: new Map(), activity: []};
 const processLabels = {running: 'Running', starting: 'Starting / waiting for status', stopped: 'Stopped', exited: 'Process exited'};
 const outputLabels = {Live: 'Live', Play: 'Delayed', Pause: 'Paused'};
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -35,27 +37,11 @@ function renderSystem(metrics, offline = false) {
   $('#network-in').textContent = bps(network?.rx_bps);
   $('#network-out').textContent = bps(network?.tx_bps);
   $('#network-detail').textContent = network ? `${network.interfaces.join(', ') || 'No interfaces'} · excluding loopback` : 'Waiting for network sample';
+  $('#storage-summary').textContent = byteSize(storage?.available_bytes);
+  $('#storage-summary-detail').textContent = storage ? `of ${byteSize(storage.total_bytes)} total available` : 'Storage unavailable';
+  $('#network-summary').textContent = `${network?.rx_bps == null ? '—' : (network.rx_bps / 1e6).toFixed(1)} / ${network?.tx_bps == null ? '—' : (network.tx_bps / 1e6).toFixed(1)}`;
   resourceMeter('#storage-meter', storage?.used_percent);
   resourceMeter('#cpu-meter', cpu?.usage_percent);
-}
-function bufferSummary(instance) {
-  // Buffer bounds are shared by all outputs; playback positions can differ.
-  const output = instance.outputs.find(output => output.ready && !output.stale &&
-    output.status.startpos && output.status.lastpos &&
-    Number.isFinite(Date.parse(output.status.startpos)) && Number.isFinite(Date.parse(output.status.lastpos)) &&
-    Date.parse(output.status.lastpos) >= Date.parse(output.status.startpos));
-  let buffered = '—', oldest = '—', latest = '—';
-  if (output) {
-    const seconds = Math.floor((Date.parse(output.status.lastpos) - Date.parse(output.status.startpos)) / 1000);
-    const days = Math.floor(seconds / 86400);
-    buffered = `${days ? `${days}d ` : ''}${Math.floor(seconds / 3600) % 24}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
-    oldest = timeText(output.status.startpos);
-    latest = timeText(output.status.lastpos);
-  }
-  return `<dl class="buffer-summary" aria-label="Instance buffer" title="Recorded buffer bounds, independent of each output's playback position.">
-    <div><dt>Total buffered time</dt><dd>${buffered}</dd></div>
-    <div><dt>Oldest in buffer (UTC)</dt><dd>${oldest}</dd></div>
-    <div><dt>Latest in buffer (UTC)</dt><dd>${latest}</dd></div></dl>`;
 }
 function setUtcInput(form, key, value) {
   const utc = value ? new Date(value).toISOString() : '';
@@ -99,7 +85,9 @@ function showLogin(message = '') {
   state.editing = null;
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
   $('#instances').replaceChildren();
-  $('#overview').replaceChildren();
+  state.activity = [];
+  state.selectedOutputs.clear();
+  render();
   $('#command-form').reset();
   $('#configuration-form').reset();
   $('#password-form').reset();
@@ -225,39 +213,132 @@ function notify(message, error = false) {
   $('#notice').hidden = false;
   $('#notice').className = error ? 'error' : '';
   $('#notice').textContent = message;
+  state.activity.unshift({title: error ? 'Command failed' : 'Control room', message, error, timestamp: new Date().toISOString()});
+  state.activity = state.activity.slice(0,100);
+  renderActivity();
+}
+const markerColors = ['#f3bd5b', '#53d39b', '#6aa8ff', '#bc96f2', '#f18ba8', '#66cbd1', '#e59e63', '#b8c67a'];
+function hasNoInput(instance) {
+  if (!state.connected || instance.pid == null || ['stopped','exited'].includes(instance.process_state)) return false;
+  // Every output reports the same shared multicast input rate. Playback can
+  // continue from disk with zero input, so output bitrate is not a signal here.
+  const rates = instance.outputs.filter(output => output.stale === false)
+    .map(output => output.metrics?.bitratein)
+    .filter(rate => typeof rate === 'number' && Number.isFinite(rate) && rate >= 0);
+  return rates.length > 0 && rates.every(rate => rate === 0);
+}
+function bufferBounds(instance) {
+  if (!state.connected || instance.pid == null) return null;
+  const output = instance.outputs.find(o => o.ready && !o.stale &&
+    Number.isFinite(Date.parse(o.status.startpos)) && Number.isFinite(Date.parse(o.status.lastpos)) &&
+    Date.parse(o.status.lastpos) > Date.parse(o.status.startpos));
+  return output ? {oldestMs: Date.parse(output.status.startpos), newestMs: Date.parse(output.status.lastpos)} : null;
+}
+function playback(instance, output) {
+  if (instance.pid == null) return {state: 'stopped', label: 'Stopped', delayMs: null};
+  const bounds = bufferBounds(instance);
+  if (!state.connected || !output.ready || output.stale || !bounds) return {state: 'invalid', label: 'Waiting for status', delayMs: null};
+  const result = classifyPlayback(Date.parse(output.status.currpos), bounds.oldestMs, bounds.newestMs);
+  const label = result.state === 'expired' ? 'Expired' : result.state === 'invalid' ? 'Unavailable' : outputLabels[output.status.state] || 'Waiting';
+  return {...result, label};
+}
+function outputEnabled(instance, output) {
+  return state.connected && instance.pid != null && output.ready && !output.stale &&
+    Boolean(bufferBounds(instance)) && Number.isFinite(Date.parse(output.status.currpos)) && !state.busy.has(instance.name);
+}
+function markerData(instance, bounds) {
+  return buildMarkerLayout(instance.outputs.map((output, index) => ({
+    ...output, positionMs: output.ready && !output.stale ? Date.parse(output.status.currpos) : NaN,
+    color: markerColors[index % markerColors.length],
+  })), bounds);
+}
+function bufferSummary(instance) {
+  const bounds = bufferBounds(instance);
+  const heading = `<div class="timeline-heading"><h3>${state.bufferView === 'ring' ? 'Ring buffer' : 'Recording timeline'}</h3><span class="timeline-duration">${bounds ? `${formatDelay(bounds.newestMs - bounds.oldestMs)} recorded` : '—'}</span></div>`;
+  if (!bounds) return `<section class="buffer-section" aria-label="Recording buffer">${heading}<p class="buffer-empty">${state.connected ? 'No current recording window available.' : 'Recording status unavailable. Reconnecting…'}</p></section>`;
+  const markers = markerData(instance, bounds);
+  const selected = state.selectedOutputs.get(instance.name);
+  const button = (marker, className, content) => `<button type="button" class="${className} output-command" data-action="jump" data-path="${marker.pathnumber}" data-color="${marker.color}" aria-haspopup="dialog" aria-pressed="${selected === marker.pathnumber}" aria-label="Jump or schedule ${escapeHTML(marker.name)}" ${outputEnabled(instance, marker) ? '' : 'disabled'}>${content}</button>`;
+  const endpoints = `<div class="timeline-bounds"><div class="timeline-endpoint"><span>Oldest available</span><time datetime="${new Date(bounds.oldestMs).toISOString()}">${timeText(bounds.oldestMs)}</time></div><div class="timeline-endpoint timeline-live"><span>Latest recorded</span><time datetime="${new Date(bounds.newestMs).toISOString()}">${timeText(bounds.newestMs)}</time></div></div>`;
+  const expired = markers.filter(m => m.state === 'expired').map(m => `<div class="timeline-expired-item"><span>${escapeHTML(m.name)} · Position overwritten</span>${button(m,'secondary-button','Recover')}</div>`).join('');
+  if (state.bufferView === 'ring') {
+    let previousAngle = -Infinity;
+    const ringMarkers = markers.filter(m => m.percent !== null).sort((a,b) => a.percent - b.percent).map(m => {
+      const angle = -150 + m.percent * 3;
+      if (angle - previousAngle < 30) return '';
+      previousAngle = angle;
+      return `<span data-angle="${angle}">${button(m,'buffer-marker',`#${m.pathnumber}`)}</span>`;
+    }).join('');
+    const legend = markers.map(m => `<button type="button" class="buffer-output" data-action="select" data-path="${m.pathnumber}" data-color="${m.color}" data-state="${m.state}" aria-pressed="${selected === m.pathnumber}"><span class="buffer-output-symbol">${m.state === 'expired' ? '!' : m.pathnumber}</span><span class="buffer-output-name">${escapeHTML(m.name)}</span><span class="buffer-output-status">${escapeHTML(playback(instance,m).label)}${m.delayMs == null || m.state === 'live' ? '' : ` · ${formatDelay(m.delayMs)}`}</span></button>`).join('');
+    return `<section class="buffer-section ring-section" aria-label="Ring buffer">${heading}<div class="ring-layout"><div class="buffer-visual"><div class="buffer-shell"><div class="buffer-ring" aria-hidden="true"></div><div class="buffer-center"><strong>${formatDelay(bounds.newestMs-bounds.oldestMs)}</strong><span>Recorded window</span></div>${ringMarkers}</div></div><div class="ring-details">${endpoints}<div class="buffer-legend">${legend}</div></div></div><div class="timeline-expired">${expired}</div></section>`;
+  }
+  const visible = markers.filter(m => m.percent !== null);
+  const lanes = Math.max(1,...visible.map(m => m.lane + 1));
+  const heads = visible.map(m => `<div class="timeline-playhead" data-position="${m.percent}" data-lane="${m.lane}" data-color="${m.color}" data-state="${m.state}"><span class="timeline-stem" aria-hidden="true"></span>${button(m,'timeline-marker',`<span class="timeline-symbol">#${m.pathnumber}</span><strong class="timeline-marker-name">${escapeHTML(m.name)}</strong><span class="timeline-marker-status">${m.status.state === 'Pause' ? 'Paused' : m.state === 'live' ? 'Live' : `−${formatDelay(m.delayMs)}`}</span>`)}<span class="timeline-tooltip" role="tooltip">${timeText(m.positionMs)} · ${escapeHTML(playback(instance,m).label)} · ${duration(m.delayMs / 1000)} behind buffer end</span></div>`).join('');
+  const ticks = [25,50,75].map(p => `<time class="timeline-tick" data-tick="${p}">${new Date(bounds.oldestMs+(bounds.newestMs-bounds.oldestMs)*p/100).toISOString().slice(11,19)}</time>`).join('');
+  return `<section class="buffer-section" aria-label="Recording timeline">${heading}<div class="timeline-scale" data-lanes="${lanes}"><div class="timeline-axis" aria-hidden="true"></div>${heads}</div>${endpoints.replace('<div class="timeline-bounds">',`<div class="timeline-bounds">${ticks}`)}<div class="timeline-expired">${expired}</div></section>`;
 }
 function outputRow(instance, output) {
   const stat = output.status, metric = output.metrics;
-  const enabled = state.connected && output.ready && stat.startpos && stat.currpos && !state.busy.has(instance.name);
-  const disabled = enabled ? '' : 'disabled';
-  const label = instance.process_state === 'stopped' || instance.process_state === 'exited' ? 'Stopped' : output.stale ? 'Waiting for fresh status' : outputLabels[stat.state] || 'Waiting';
-  const badge = output.stale ? 'stale' : (stat.state || '').toLowerCase();
-  const delay = stat.lastpos && stat.currpos ? Math.max(0, (new Date(stat.lastpos) - new Date(stat.currpos)) / 1000) : null;
-  const button = (action, text) => `<button class="output-command" data-action="${action}" data-path="${output.pathnumber}" ${disabled}>${text}</button>`;
-  return `<tr><td><span class="output-name">${escapeHTML(output.name)}</span><span class="sub">#${output.pathnumber} · ${escapeHTML(output.host)}:${output.port}<br>TTL ${output.ttl} · ${output.rawudp ? 'Raw UDP' : 'RTP preserved'}</span></td>
-    <td><span class="badge ${badge}">${label}</span><span class="sub">${duration(delay)} behind buffer end</span></td>
-    <td class="time">${timeText(stat.currpos)}<span class="sub">From ${timeText(stat.startpos)}<br>To ${timeText(stat.lastpos)}</span></td>
-    <td>${bps(metric.bitrateout)}<span class="sub">In ${bps(metric.bitratein)}<br>UDP-drops ${escapeHTML(metric.udpdrops ?? '—')}</span></td>
-    <td><div class="actions">${button('play','Play')}${button('pause','Pause')}${button('jump','Jump / schedule')}${button('playto','Play until')}</div>
-    <span class="sub">Start ${timeText(stat.startplayat)} · Stop ${timeText(stat.playto)}</span></td></tr>`;
+  const position = playback(instance, output);
+  const enabled = outputEnabled(instance, output);
+  const button = (action, text, unavailable = false) => `<button class="output-command" data-action="${action}" data-path="${output.pathnumber}" ${enabled && !unavailable ? '' : 'disabled'}>${text}</button>`;
+  return `<article class="output-row" data-output="${output.pathnumber}" data-selected="${state.selectedOutputs.get(instance.name) === output.pathnumber}">
+    <div class="output-name"><strong>${escapeHTML(output.name)}</strong><span>#${output.pathnumber} · ${escapeHTML(output.host)}:${output.port} · TTL ${output.ttl} · ${output.rawudp ? 'Raw UDP' : 'RTP preserved'}</span><span>${bps(metric.bitrateout)} out · ${bps(metric.bitratein)} in · UDP-drops ${escapeHTML(metric.udpdrops ?? '—')}</span></div>
+    <span class="output-state" data-state="${position.state === 'live' && stat.state === 'Pause' ? 'available' : position.state}">${position.label}</span>
+    <div class="output-position"><strong>${timeText(stat.currpos)}</strong><span>${position.delayMs == null ? 'Last reported position' : `${duration(position.delayMs / 1000)} behind buffer end`}</span>${position.state === 'expired' ? '<span class="output-warning">Position overwritten · recovery required</span>' : ''}<span>Start ${timeText(stat.startplayat)} · Stop ${timeText(stat.playto)}</span></div>
+    <div class="row-actions">${button('play','Play',position.state === 'expired')}${button('pause','Pause')}${button('jump',position.state === 'expired' ? 'Recover / schedule' : 'Jump / schedule')}${button('playto','Play until')}</div></article>`;
+}
+function renderActivity() {
+  const entries = [...state.activity, ...state.instances.flatMap(instance => instance.logs.map(log => ({timestamp: log.timestamp, title: instance.name, message: log.text})))].sort((a,b) => Date.parse(b.timestamp)-Date.parse(a.timestamp)).slice(0,100);
+  const content = entries.map(item => `<li class="activity-item" data-tone="${item.error ? 'warning' : 'success'}"><i class="activity-dot" aria-hidden="true"></i><div><b>${escapeHTML(item.title)}</b><span>${escapeHTML(item.message)}</span></div><time>${timeText(item.timestamp)}</time></li>`).join('') || '<li class="empty">No operational messages yet.</li>';
+  $('#activity-list').innerHTML = content;
+  $('#notification-list').innerHTML = content;
+  $('#notification-count').textContent = entries.length;
+  $('#activity-tab-count').textContent = entries.length;
 }
 function render() {
   const focused = document.activeElement;
-  const focusKey = focused?.dataset.action ? [focused.closest('[data-instance]')?.dataset.instance, focused.dataset.action, focused.dataset.path] : null;
-  const openLogs = new Set([...document.querySelectorAll('details[open]')].map(el => el.closest('[data-instance]').dataset.instance));
-  $('#overview').innerHTML = `<div><strong>${state.instances.filter(i => i.process_state === 'running').length}/${state.instances.length}</strong><span>INSTANCES RUNNING</span></div><div><strong>${state.instances.reduce((sum,i) => sum + i.outputs.length,0)}</strong><span>OUTPUTS</span></div>`;
+  const focusKey = focused?.dataset.action ? [focused.closest('[data-instance]')?.dataset.instance, focused.dataset.action, focused.dataset.path, focused.className] : null;
+  const openLogs = new Set([...document.querySelectorAll('#instances details[open]')].map(el => el.closest('[data-instance]').dataset.instance));
+  const running = state.instances.filter(i => i.process_state === 'running').length;
+  const outputs = state.instances.flatMap(i => i.outputs);
+  $('#running-summary').textContent = `${running} / ${state.instances.length}`;
+  $('#output-summary').textContent = outputs.length;
+  $('#active-output-summary').textContent = `${state.connected ? outputs.filter(o => o.ready && !o.stale && ['Live','Play'].includes(o.status.state)).length : '—'} active`;
+  $('#instance-tab-count').textContent = state.instances.length;
+  const warning = state.instances.some(i => hasNoInput(i) || i.process_state === 'exited' || i.outputs.some(o => o.stale));
+  $('#health-value').textContent = !state.connected ? 'Unavailable' : warning ? 'Needs attention' : state.instances.some(i => i.process_state === 'starting') ? 'Starting' : 'Connected';
+  $('#health-detail').textContent = !state.connected ? 'Reconnecting to service' : warning ? 'Check instance status' : 'Status updates every 2 seconds';
+  $('.health-card').classList.toggle('unavailable', !state.connected || warning);
   $('#instances').innerHTML = state.instances.map(instance => {
-    const running = instance.pid !== null;
-    const disabled = state.busy.has(instance.name) ? 'disabled' : '';
-    return `<section class="instance" data-instance="${escapeHTML(instance.name)}"><div class="instance-header"><div><div class="instance-title"><h2>${escapeHTML(instance.name)}</h2><span class="badge ${instance.process_state}">${processLabels[instance.process_state]}</span></div><div class="source">INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Retention ${Math.round(instance.msbuffer / 60000)} min · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</div></div><div class="instance-buttons"><button class="config-command" data-action="export" ${!state.connected ? 'disabled' : disabled}>Export JSON</button><button class="config-command" data-action="import" ${running || !state.connected ? 'disabled' : disabled} title="Stop the instance before importing">Import JSON</button><button class="config-command" data-action="configure" ${running || !state.connected ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></div>
-      ${bufferSummary(instance)}
-      <div class="table-scroll"><table><thead><tr><th>Output</th><th>Status</th><th>Recorded position / buffer</th><th>Traffic</th><th>Output controls</th></tr></thead><tbody>${instance.outputs.map(o => outputRow(instance,o)).join('')}</tbody></table></div>
+    const running = instance.pid != null;
+    const noInput = hasNoInput(instance);
+    const displayState = noInput ? 'no-input' : instance.process_state;
+    const label = noInput ? 'No input' : processLabels[instance.process_state] || 'Unknown';
+    const disabled = state.busy.has(instance.name) || !state.connected ? 'disabled' : '';
+    return `<article class="instance-card" data-instance="${escapeHTML(instance.name)}" data-state="${displayState}"><header class="instance-header"><div class="instance-identity"><span class="state-chip" data-state="${displayState}">${label}</span><div><h2>${escapeHTML(instance.name)}</h2><p>INPUT ${escapeHTML(instance.source.host)}:${instance.source.port} · Retention ${formatDelay(instance.msbuffer)} · ${running ? `PID ${instance.pid}` : `Exit ${instance.last_exit_code ?? '—'}`} · Autostart ${instance.autostart ? 'on' : 'off'}</p></div></div><div class="instance-header-actions"><button class="config-command" data-action="export" ${disabled}>Export JSON</button><button class="config-command" data-action="import" ${running ? 'disabled' : disabled} title="Stop the instance before importing">Import JSON</button><button class="config-command" data-action="configure" ${running ? 'disabled' : disabled} title="${running ? 'Stop the instance to change its input and outputs' : 'Edit input and outputs'}">Configure</button><button data-action="${running ? 'stop' : 'start'}" class="${running ? 'danger' : 'primary'}" ${disabled}>${running ? 'Stop instance' : 'Start instance'}</button></div></header>
+      <div class="instance-content" data-visualization="${state.bufferView}">${bufferSummary(instance)}<section class="outputs-section" aria-label="Outputs"><div class="outputs-heading"><h3>Outputs · ${instance.outputs.length}</h3></div><div class="output-list">${instance.outputs.map(o => outputRow(instance,o)).join('')}</div></section></div>
       ${instance.pending.length ? `<div class="queue">Command queue: ${instance.pending.map(c => `#${c.id} ${escapeHTML(c.action)} → output ${c.pathnumber}`).join(' · ')}</div>` : ''}
-      <details ${openLogs.has(instance.name) ? 'open' : ''}><summary>Recent operational messages</summary><div class="logs">${instance.logs.map(log => `${timeText(log.timestamp)} ${escapeHTML(log.text)}`).join('\n') || 'No messages yet.'}</div></details></section>`;
-  }).join('') || '<section class="empty"><h2>Create your first instance</h2><p>Select New instance to configure an input and one or more outputs.</p></section>';
+      <details ${openLogs.has(instance.name) ? 'open' : ''}><summary>Recent operational messages</summary><div class="logs">${instance.logs.map(log => `${timeText(log.timestamp)} ${escapeHTML(log.text)}`).join('\n') || 'No messages yet.'}</div></details><footer class="instance-footer"><span>${noInput ? 'No multicast input detected' : running ? 'Recording continues independently of output playback' : 'Instance stopped · no active recording'}</span><span>All times UTC</span></footer></article>`;
+  }).join('') || '<section class="utility-panel empty"><h2>Create your first instance</h2><p>Select New instance to configure an input and one or more outputs.</p></section>';
+  // Set dynamic geometry through CSSOM so the strict style-src CSP stays intact.
+  for (const el of document.querySelectorAll('[data-position]')) {
+    el.style.setProperty('--position',`${el.dataset.position}%`);
+    el.style.setProperty('--lane',el.dataset.lane);
+  }
+  for (const el of document.querySelectorAll('[data-color]')) el.style.setProperty('--marker-color',el.dataset.color);
+  for (const el of document.querySelectorAll('[data-lanes]')) el.style.setProperty('--lanes',el.dataset.lanes);
+  for (const el of document.querySelectorAll('[data-angle]')) $('button',el).style.setProperty('--marker-angle',`${el.dataset.angle}deg`);
+  for (const el of document.querySelectorAll('[data-tick]')) el.style.setProperty('--tick-position',`${el.dataset.tick}%`);
+  for (const [index,tooltip] of [...document.querySelectorAll('.timeline-tooltip')].entries()) {
+    tooltip.id = `playhead-tooltip-${index}`;
+    $('.timeline-marker',tooltip.parentElement).setAttribute('aria-describedby',tooltip.id);
+  }
+  renderActivity();
   if (focusKey) {
     const section = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === focusKey[0]);
-    const next = section && [...section.querySelectorAll('button')].find(el => el.dataset.action === focusKey[1] && el.dataset.path === focusKey[2]);
+    const next = section && [...section.querySelectorAll('button')].find(el => el.dataset.action === focusKey[1] && el.dataset.path === focusKey[2] && el.className === focusKey[3]);
     next?.focus({preventScroll: true});
   }
 }
@@ -274,8 +355,9 @@ async function refresh() {
     $('#export-all').disabled = false;
     $('#import-all').disabled = false;
     document.body.classList.remove('disconnected');
-    $('#connection').textContent = `● Connected · ${new Date(result.sampled_at).toISOString().slice(11, 19)} UTC`;
-    $('#connection').className = 'online';
+    $('#connection').textContent = `Connected · ${new Date(result.sampled_at).toISOString().slice(11, 19)} UTC`;
+    $('#connection').className = 'connection-pill online';
+    for (const button of document.querySelectorAll('[data-global-action]')) button.disabled = false;
     render();
   } catch (error) {
     if (!state.authenticated || generation !== state.authGeneration) return;
@@ -286,7 +368,9 @@ async function refresh() {
     $('#import-all').disabled = true;
     document.body.classList.add('disconnected');
     $('#connection').textContent = `Status unavailable · ${error.message}`;
-    $('#connection').className = 'offline';
+    $('#connection').className = 'connection-pill offline';
+    for (const button of document.querySelectorAll('[data-global-action]')) button.disabled = button.dataset.globalAction !== 'password';
+    render();
     document.querySelectorAll('.output-command,.config-command').forEach(button => button.disabled = true);
   }
 }
@@ -308,6 +392,8 @@ $('#instances').addEventListener('click', async event => {
   const name = button.closest('[data-instance]').dataset.instance;
   const action = button.dataset.action;
   const path = button.dataset.path == null ? null : Number(button.dataset.path);
+  if (path != null) selectOutput(name,path);
+  if (action === 'select') return;
   if (action === 'export') {
     try { await downloadConfiguration(name); } catch (error) { notify(error.message,true); }
     return;
@@ -335,7 +421,14 @@ $('#instances').addEventListener('click', async event => {
     form.elements.jumptopos_time.required = action === 'jump';
     form.elements.jumptopos_date.min = output.status.startpos?.slice(0, 10) || '';
     form.elements.jumptopos_date.max = output.status.lastpos?.slice(0, 10) || '';
-    setUtcInput(form, 'jumptopos', action === 'jump' ? output.status.currpos || output.status.startpos : null);
+    const position = playback(state.instances.find(i => i.name === name),output);
+    // Date/time fields use whole seconds. Round the lower bound upward so
+    // subsecond timestamps cannot prefill a position that is already expired.
+    const start = output.status.startpos;
+    const fractionalStart = /\.\d*[1-9]\d*(?:Z|[+-])/.test(start || '');
+    const earliest = Math.floor(Date.parse(start) / 1000) * 1000 + (fractionalStart ? 1000 : 0);
+    const current = position.state === 'expired' ? earliest : Math.max(earliest, Date.parse(output.status.currpos) || earliest);
+    setUtcInput(form, 'jumptopos', action === 'jump' ? current : null);
     setUtcInput(form, 'playto', output.status.playto);
     $('#form-error').textContent = '';
     $('#command-dialog').showModal();
@@ -368,7 +461,7 @@ $('#command-form').addEventListener('submit', async event => {
   } catch (error) { $('#form-error').textContent = error.message; }
   finally { submit.disabled = false; }
 });
-for (const selector of ['.close','.cancel']) $(selector).addEventListener('click',() => $('#command-dialog').close());
+for (const button of document.querySelectorAll('[data-close-command]')) button.addEventListener('click',() => $('#command-dialog').close());
 
 function outputFields(output = {}) {
   const fieldset = document.createElement('fieldset');
@@ -521,5 +614,78 @@ $('#import-form').addEventListener('submit',async event => {
   } catch (error) { $('#import-error').textContent = error.message; }
   finally { submit.disabled = false; }
 });
+function selectOutput(name, path) {
+  state.selectedOutputs.set(name,path);
+  const card = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === name);
+  if (!card) return;
+  for (const row of card.querySelectorAll('[data-output]')) row.dataset.selected = String(Number(row.dataset.output) === path);
+  for (const button of card.querySelectorAll('.timeline-marker,.buffer-marker,.buffer-output')) button.setAttribute('aria-pressed', String(Number(button.dataset.path) === path));
+}
+$('#instances').addEventListener('focusin', event => {
+  const marker = event.target.closest('.timeline-marker,.buffer-marker,.buffer-output');
+  if (marker) selectOutput(marker.closest('[data-instance]').dataset.instance, Number(marker.dataset.path));
+});
+$('#instances').addEventListener('click', event => {
+  const row = event.target.closest('[data-output]');
+  if (row && !event.target.closest('button')) selectOutput(row.closest('[data-instance]').dataset.instance, Number(row.dataset.output));
+});
+$('#instances').addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    const head = event.target.closest('.timeline-playhead');
+    if (head) head.dataset.tooltipDismissed = 'true';
+  }
+});
+$('#instances').addEventListener('focusout', event => {
+  const head = event.target.closest('.timeline-playhead');
+  if (head) delete head.dataset.tooltipDismissed;
+});
+$('#instances').addEventListener('pointerout', event => {
+  const head = event.target.closest('.timeline-playhead');
+  if (head && !head.contains(event.relatedTarget)) delete head.dataset.tooltipDismissed;
+});
+const tabs = [...document.querySelectorAll('[role="tab"]')];
+function switchTab(tab) {
+  for (const candidate of tabs) {
+    const active = candidate === tab;
+    candidate.setAttribute('aria-selected',String(active));
+    candidate.tabIndex = active ? 0 : -1;
+    document.getElementById(candidate.getAttribute('aria-controls')).hidden = !active;
+  }
+}
+for (const tab of tabs) {
+  tab.addEventListener('click',() => switchTab(tab));
+  tab.addEventListener('keydown',event => {
+    const index = tabs.indexOf(tab);
+    const target = event.key === 'ArrowRight' ? tabs[(index+1)%tabs.length] : event.key === 'ArrowLeft' ? tabs[(index+tabs.length-1)%tabs.length] : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : null;
+    if (target) { event.preventDefault(); switchTab(target); target.focus(); }
+  });
+}
+for (const button of document.querySelectorAll('[data-buffer-view]')) button.addEventListener('click', () => {
+  state.bufferView = button.dataset.bufferView;
+  for (const candidate of document.querySelectorAll('[data-buffer-view]')) candidate.setAttribute('aria-pressed',String(candidate === button));
+  render();
+});
+$('#density-toggle').addEventListener('click',event => {
+  const compact = document.body.classList.toggle('compact');
+  event.currentTarget.setAttribute('aria-pressed',String(compact));
+});
+$('#notifications-button').addEventListener('click', () => {
+  $('#notification-drawer').showModal();
+  $('#notifications-button').setAttribute('aria-expanded','true');
+});
+$('[data-drawer-close]').addEventListener('click',() => $('#notification-drawer').close());
+$('#notification-drawer').addEventListener('close',() => $('#notifications-button').setAttribute('aria-expanded','false'));
+for (const button of document.querySelectorAll('[data-global-action]')) button.addEventListener('click', () => {
+  const target = {new: '#add-instance', import: '#import-all', export: '#export-all', password: '#change-password'}[button.dataset.globalAction];
+  $(target).click();
+});
+function updateClock() {
+  const now = new Date();
+  $('#utc-clock').dateTime = now.toISOString();
+  $('#utc-clock').textContent = `${now.toISOString().slice(11,19)} UTC`;
+}
+updateClock();
+setInterval(updateClock,1000);
+
 restoreSession();
 (async function poll() { await refresh(); setTimeout(poll,2000); })();

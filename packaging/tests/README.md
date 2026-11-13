@@ -15,9 +15,9 @@ From the repository root:
 
 ```sh
 python3 -m unittest discover -s packaging/tests -p 'test_*.py' -v
-./packaging/build-deb.sh --ubuntu all --version 4.1.2
-python3 packaging/tests/runtime.py --image t-delayer:runtime-4.1.2-ubuntu24.04-amd64
-python3 packaging/tests/runtime.py --image t-delayer:runtime-4.1.2-ubuntu26.04-amd64
+./packaging/build-deb.sh --ubuntu all --version 4.2.0
+python3 packaging/tests/runtime.py --image t-delayer:runtime-4.2.0-ubuntu24.04-amd64
+python3 packaging/tests/runtime.py --image t-delayer:runtime-4.2.0-ubuntu26.04-amd64
 ```
 
 The runtime test uses unique containers/networks and temporary bind directories.
@@ -31,17 +31,17 @@ Exercise the actual Debian maintainer scripts in a disposable container, once
 per release (replace `24.04` with `26.04` for the second run):
 
 ```sh
-mkdir -p build-artifacts/debian-qa-4.1.2/24.04/share
-mkdir -p build-artifacts/debian-qa-4.1.2/24.04/evidence
+mkdir -p build-artifacts/debian-qa-4.2.0/24.04/share
+mkdir -p build-artifacts/debian-qa-4.2.0/24.04/evidence
 docker run --rm --platform linux/amd64 --entrypoint sh \
   -e DELAYER_PACKAGE_TEST=isolated \
   -e DELAYER_ATTENDED_TRANSCRIPT=/results/attended-installer.log \
-  --mount "type=bind,src=$PWD/build-artifacts/debian-qa-4.1.2/24.04/share,dst=/usr/share/t-delayer" \
-  --mount "type=bind,src=$PWD/build-artifacts/debian-qa-4.1.2/24.04/evidence,dst=/results" \
+  --mount "type=bind,src=$PWD/build-artifacts/debian-qa-4.2.0/24.04/share,dst=/usr/share/t-delayer" \
+  --mount "type=bind,src=$PWD/build-artifacts/debian-qa-4.2.0/24.04/evidence,dst=/results" \
   --mount "type=bind,src=$PWD/packaging/tests,dst=/tests,readonly" \
   --mount "type=bind,src=$PWD/build-artifacts/deb,dst=/packages,readonly" \
-  t-delayer:runtime-4.1.2-ubuntu24.04-amd64 \
-  /tests/debian.sh /packages/t-delayer-docker_4.1.2-1ubuntu24.04_amd64.deb
+  t-delayer:runtime-4.2.0-ubuntu24.04-amd64 \
+  /tests/debian.sh /packages/t-delayer-docker_4.2.0-1ubuntu24.04_amd64.deb
 ```
 
 This test uses real `dpkg` and debconf with Docker/systemd test doubles: it
@@ -77,7 +77,7 @@ docker run --rm --name t-delayer-vm-test \
   --mount type=volume,src=t-delayer-vm-test-work,dst=/work \
   --mount "type=bind,src=$PWD/build-artifacts/deb,dst=/packages,readonly" \
   --mount "type=bind,src=$PWD/build-artifacts/vm-tests/manual-run,dst=/results" \
-  t-delayer:vm-test-runner --ubuntu all --version 4.1.2 --attended
+  t-delayer:vm-test-runner --ubuntu all --version 4.2.0 --attended
 ```
 
 Use `--ubuntu 24.04` or `--ubuntu 26.04` for one release. The guest installs the
@@ -114,3 +114,47 @@ Check both the host filesystem and Docker's internal disk before starting.
 Physical multicast in host mode or macvlan/ipvlan still needs verification on
 the deployment NIC, switch, and routing setup. A VM storage/boot test does not
 establish physical multicast behavior.
+
+## Named installations
+
+Version 4.2.0 validation on 2026-11-13 passed 22 unit tests, the real Docker
+three-installation test, and disposable Debian installation/reconfiguration and
+upgrade compatibility tests from 4.1.2 for both Ubuntu 24.04 and 26.04. Logs are retained
+under `build-artifacts/named-installations-*.log`. The unit suite includes a real
+TCP listener/TIME_WAIT regression check: an active listener is rejected while
+closed HTTP connections do not prevent immediate restart.
+
+The final Ubuntu 26.04 package also passed the full named-installation VM run
+with real systemd and Docker: three concurrent installations, shared-browser
+cookie isolation, scoped restart/stop/start, reboot with all recording mounts
+held, automatic startup after mount release, persisted data, and real APT
+remove/purge retaining data. Evidence is in
+`build-artifacts/vm-tests/2026-11-13-named-installations/26.04/`, including
+`result.json` and `named-installations.json`. This named-installation VM run was
+noninteractive; the earlier attended VM results above remain separate.
+
+```sh
+python3 -m unittest discover -s packaging/tests -p 'test_*.py' -v
+python3 packaging/tests/multiple_runtime.py --image t-delayer:runtime-4.2.0-ubuntu26.04-amd64
+```
+
+The multi-installation test uses a legacy/default installation and two named
+installations with unique test containers, networks, ports and temporary bind
+storage. All three use real PostgreSQL, the controller API and Docker lifecycle
+operations. It checks independent credentials/databases with identical stream
+names, password isolation, selected recreation without changing other container
+IDs, persistence, collision rejection and scoped removal. It does not invoke host
+systemd or modify an installed host package. The helper's systemd dispatch and
+lock handoff have separate unit coverage.
+
+Use `--named-installations` with the VM runner to verify real systemd dispatch,
+shared-browser cookie isolation, selected restart/stop/start, both named units
+waiting for the recording mount during reboot, and actual package removal/purge
+with persistent data retained. Bind the host work directory as described above
+when Docker's internal disk lacks room for guest disks. The runner directory
+must include `named_installations.py`; rebuild the runner image after updating
+its sources, or bind that source directory at `/opt/vm-test` read-only.
+
+The disposable Debian script also accepts a second package path to test an
+upgrade, e.g. `/tests/debian.sh OLD_PACKAGE.deb CANDIDATE_PACKAGE.deb`. It verifies
+that existing default credentials and debconf answers survive the upgrade.

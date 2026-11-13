@@ -4,7 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(dirname "$SCRIPT_DIR")
 UBUNTU=all
-VERSION=4.1.2
+VERSION=4.2.0
 OUTPUT="$REPO_ROOT/build-artifacts/deb"
 usage() {
     echo "Usage: $0 [--ubuntu 24.04|26.04|all] [--version VERSION] [--output DIRECTORY]"
@@ -55,6 +55,7 @@ for TARGET in $TARGETS; do
     sed "s/@UBUNTU@/$TARGET/g" "$SCRIPT_DIR/debian/preinst" > "$PACKAGE/DEBIAN/preinst"
     cp "$SCRIPT_DIR/t-delayerctl.py" "$PACKAGE/usr/sbin/t-delayerctl"
     cp "$SCRIPT_DIR/t-delayer-docker.service" "$PACKAGE/usr/lib/systemd/system/"
+    cp "$SCRIPT_DIR/t-delayer@.service" "$PACKAGE/usr/lib/systemd/system/"
     cp "$SCRIPT_DIR/INSTALL.md" "$PACKAGE/usr/share/doc/t-delayer-docker/INSTALL.md"
     docker image inspect "$RUNTIME" > "$STAGING/image-inspect.json"
     python3 - "$SCRIPT_DIR/t-delayerctl.py" "$STAGING/image-inspect.json" "$SHARE/images.json" "$TARGET" "$RUNTIME" <<'PY'

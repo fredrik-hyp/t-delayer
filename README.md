@@ -9,8 +9,19 @@ Build a `.deb` that runs PostgreSQL, delayer, nginx, and the English web UI in
 one container, with interactive network selection and persistent host storage:
 
 ```sh
-./packaging/build-deb.sh --ubuntu all --version 4.1.2
+./packaging/build-deb.sh --ubuntu all --version 4.2.0
 ```
+
+The helper also supports named installations with separate ports, databases,
+credentials and recordings:
+
+```sh
+sudo t-delayerctl create production --web-port 9010
+sudo t-delayerctl create test --web-port 9020
+sudo t-delayerctl list
+```
+
+Existing commands without a name continue to manage the original installation.
 
 See the [installation and administration manual](packaging/INSTALL.md) for host
 requirements, installation, network choices, reconfiguration, and backups.

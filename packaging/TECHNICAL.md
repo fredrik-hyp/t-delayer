@@ -7,10 +7,10 @@ Package generation for Ubuntu 24.04 LTS and 26.04 LTS on amd64.
 From the repository root on a machine with Python 3 and a working Docker CLI/daemon:
 
 ```sh
-./packaging/build-deb.sh --ubuntu all --version 4.1.2
+./packaging/build-deb.sh --ubuntu all --version 4.2.0
 # Or build one release:
-./packaging/build-deb.sh --ubuntu 24.04 --version 4.1.2
-./packaging/build-deb.sh --ubuntu 26.04 --version 4.1.2
+./packaging/build-deb.sh --ubuntu 24.04 --version 4.2.0
+./packaging/build-deb.sh --ubuntu 26.04 --version 4.2.0
 ```
 
 The build machine needs network access to Ubuntu registries/APT repositories,
@@ -23,8 +23,8 @@ image build. The final image includes the release binary and English web UI.
 Output defaults to `build-artifacts/deb/`; change it with `--output DIRECTORY`:
 
 ```text
-t-delayer-docker_4.1.2-1ubuntu24.04_amd64.deb
-t-delayer-docker_4.1.2-1ubuntu26.04_amd64.deb
+t-delayer-docker_4.2.0-1ubuntu24.04_amd64.deb
+t-delayer-docker_4.2.0-1ubuntu26.04_amd64.deb
 ```
 
 Each package contains a complete single-container image matching its Ubuntu
@@ -77,3 +77,25 @@ Docker ran while the container remained stopped and the application start job
 waited. Releasing the mount triggered automatic healthy startup, with database,
 recording, credential and authentication data preserved. The complete evidence
 and earlier 4.1.1 results are recorded in `packaging/tests/VM-VALIDATION.md`.
+
+## Named installation identities and lifecycle
+
+`t-delayerctl` keeps the legacy/default paths and controller identity unchanged.
+Named installations use `/etc/t-delayer/installations/NAME` and
+`/var/lib/t-delayer/installations/NAME`, plus `t-delayer-NAME`,
+`t-delayer-NAME-bridge`, controller `t-delayer-docker-NAME` and
+`t-delayer@NAME.service`. Docker objects carry both the existing package ownership
+label and `io.polylegio.t-delayer.installation=NAME`. Legacy default objects
+without the additional label remain accepted; named objects require a matching
+identity before mutation.
+
+One registry lock serializes configuration, port selection and direct Docker
+operations. Public named start/stop/restart calls go through systemd. The template
+invokes the helper with internal `--direct` start/stop actions. Systemd calls are
+made outside the registry lock so ExecStart/ExecStop can acquire it. Per-service
+storage drop-ins gate startup on recording mounts. Package removal stops and
+disables all owned services before removing containers; persistent data survives.
+
+The single verified image manifest remains package-wide. Running named
+containers are not restarted automatically by package upgrades. Explicitly
+restart selected installations to recreate them from the updated image.

@@ -134,6 +134,7 @@ class PackagingTests(unittest.TestCase):
             with patch.object(ctl, "CONFIG_DIR", config_dir), patch.object(ctl, "STATE_DIR", state_dir), \
                     patch.object(ctl, "configuration", return_value=config), \
                     patch.object(ctl, "validate_docker", return_value="host"), \
+                    patch.object(ctl, "validate_listener"), \
                     patch.object(ctl, "bundled_image", return_value={"Id": "sha256:" + "a" * 64}), \
                     patch.object(ctl, "check_owned", return_value=None), \
                     patch.object(ctl, "inspect", side_effect=probes), patch.object(ctl.time, "sleep"), \

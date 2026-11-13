@@ -69,6 +69,18 @@ assert not any('POSTGRES_PASSWORD=' in arg or 'WEB_PASSWORD=' in arg for arg in 
 assert Path('/usr/share/doc/t-delayer-docker/INSTALL.md').exists()
 Path('/tmp/saved-credentials').write_bytes(Path('/var/lib/t-delayer/credentials.json').read_bytes())
 PY
+# Optional upgrade from the first package to a candidate, preserving legacy
+# credentials and already-seen debconf answers before testing reconfiguration.
+if [ -n "${2:-}" ]; then
+    dpkg --unpack "$2"
+    dpkg --force-depends --configure t-delayer-docker
+    test -f /usr/lib/systemd/system/t-delayer@.service
+    python3 - <<'UPGRADE'
+from pathlib import Path
+assert Path('/tmp/saved-credentials').read_bytes()==Path('/var/lib/t-delayer/credentials.json').read_bytes()
+UPGRADE
+    echo 'PASS upgrade preserves the existing default installation and installs named service support'
+fi
 python3 /tests/attended.py
 printf '%s\n' \
   't-delayer-docker t-delayer-docker/network-mode select host' \

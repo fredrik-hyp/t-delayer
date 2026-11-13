@@ -20,8 +20,9 @@ import traceback
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--ubuntu", choices=("24.04", "26.04", "all"), default="all")
-parser.add_argument("--version", default="4.1.2")
+parser.add_argument("--version", default="4.2.0")
 parser.add_argument("--attended", action="store_true", help="Install with actual readline prompts driven through a guest PTY")
+parser.add_argument("--named-installations", action="store_true", help="Verify parallel named units, reboot/mount ordering and package removal")
 parser.add_argument("--resume", action="store_true", help="Reuse existing disposable guest disks after a test interruption")
 parser.add_argument("--fresh-app", action="store_true", help="Reset application data only in the disposable guest before installation")
 args = parser.parse_args()
@@ -208,6 +209,9 @@ else
  apt-get install -y /tmp/delayer.deb
 fi
 """
+        if args.named_installations and not args.attended:
+            install_command = install_command.replace("video-path string /srv/delayer-video'",
+                                                      "video-path string /srv/delayer-video/default'")
         install = f"""
 mountunit=$(systemd-escape --path --suffix=mount /srv/delayer-video)
 rm -f "/etc/systemd/system/$mountunit.d/test-gate.conf"
@@ -258,6 +262,11 @@ systemd-analyze verify /usr/lib/systemd/system/t-delayer-docker.service
             (output / 'attended-install.json').write_text(json.dumps(attended, indent=2) + '\n')
             passed("attended APT: real terminal prompts and saved web-bind answer", attended)
         passed("service enabled and container healthy")
+        if args.named_installations:
+            payload = base64.b64encode(Path(__file__).with_name('named_installations.py').read_bytes()).decode()
+            ssh(f"printf '%s' '{payload}' | base64 -d > /root/named-installations.py")
+            evidence = ssh("python3 /root/named-installations.py prepare", timeout=900).stdout
+            passed("parallel named services and scoped lifecycle through actual systemd", evidence)
         ssh("""
 docker exec t-delayer psql -v ON_ERROR_STOP=1 -U delayer -d delayerdb -c \
  "CREATE TABLE IF NOT EXISTS vm_boot_sentinel(value text); TRUNCATE vm_boot_sentinel; INSERT INTO vm_boot_sentinel VALUES ('preserved')"
@@ -303,6 +312,9 @@ test "$(find /srv/delayer-video -mindepth 1 -maxdepth 1 -printf '%f\\n')" = unde
         (output / "blocked-jobs.txt").write_text(blocked)
         passed("reboot: Docker active while recording disk and container remain blocked")
         passed("no recording data written to unmounted underlying directory")
+        if args.named_installations:
+            evidence = ssh("python3 /root/named-installations.py blocked").stdout
+            passed("named services also wait for the recording disk mount", evidence)
         event(f"Ubuntu {release}: releasing disk mount; waiting for automatic container startup")
         after = ssh("""
 touch /run/delayer-test-disk-release
@@ -329,10 +341,17 @@ docker inspect -f '{{.State.StartedAt}} {{.State.Health.Status}}' t-delayer
         (output / "after-release.txt").write_text(after)
         passed("container startup follows recording mount activation", after)
         passed("database, recording disk and authentication persist after reboot")
+        if args.named_installations:
+            evidence = ssh("python3 /root/named-installations.py verify", timeout=480).stdout
+            passed("named services start after mount and preserve all data on reboot", evidence)
         journal = ssh("mountunit=$(systemd-escape --path --suffix=mount /srv/delayer-video); "
                       "journalctl -b --no-pager -o short-monotonic -u docker.service -u t-delayer-docker.service "
                       "-u delayer-test-disk-gate.service -u \"$mountunit\"").stdout
         (output / "boot-journal.txt").write_text(journal)
+        if args.named_installations:
+            evidence = ssh("python3 /root/named-installations.py remove", timeout=300).stdout
+            passed("real package remove/purge handles all installations and retains data", evidence)
+            (output / "named-installations.json").write_text(ssh("cat /root/named-installation-evidence.json").stdout)
         result["status"] = "passed"
         save()
         event(f"Ubuntu {release}: ALL VM CHECKS PASSED")

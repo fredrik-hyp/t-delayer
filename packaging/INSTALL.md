@@ -1,8 +1,9 @@
 # T-Delayer Docker package: installation and administration
 
 This package runs **PostgreSQL, the delayer processes, nginx, and the web UI
-controller in one Docker container**, named `t-delayer`. A host systemd service
-manages the container. No Docker Compose installation is required. PostgreSQL
+controller in one Docker container per installation**. The default container is
+named `t-delayer`; additional named installations run alongside it. A host systemd
+service manages each container. No Docker Compose installation is required. PostgreSQL
 accepts connections only through a Unix socket inside the container; it does not
 listen on a host or container TCP port.
 
@@ -59,7 +60,7 @@ missing host dependencies unless you have provisioned them beforehand.
 Copy the matching `.deb` to the host and run:
 
 ```sh
-sudo apt install ./t-delayer-docker_4.1.2-1ubuntu24.04_amd64.deb
+sudo apt install ./t-delayer-docker_4.2.0-1ubuntu24.04_amd64.deb
 # On Ubuntu 26.04, use the ubuntu26.04 package instead.
 ```
 
@@ -148,6 +149,91 @@ prevents direct host-to-container communication; configure a host macvlan
 interface if you need it. NIC/switch support for multiple MAC addresses is
 required. Physical macvlan/ipvlan multicast must be verified on the actual host.
 
+## Named installations on the same server
+
+The existing installation remains `default`. All commands without a name retain
+its container `t-delayer`, service `t-delayer-docker.service`, configuration,
+credentials and data paths. `default` is also accepted explicitly; no migration
+or renaming is required.
+
+Create and start two independent installations with separate web ports:
+
+```sh
+sudo t-delayerctl create production --web-port 9010
+sudo t-delayerctl create test --web-port 9020
+sudo t-delayerctl list
+sudo t-delayerctl credentials production
+sudo t-delayerctl credentials test
+```
+
+Names use 1–40 lowercase letters, digits, underscores or dashes, starting with a
+letter or digit. `default` is reserved. Each installation starts with its own
+empty stream configuration; add streams in its UI or import JSON. Passwords,
+PostgreSQL, recordings and login sessions are independent. Stream names may be
+reused between installations because their databases and recording directories
+are separate.
+
+`create` validates settings, writes private configuration and credentials, and
+enables/starts `t-delayer@NAME.service`. Use `--no-start` to enable it for boot
+without starting immediately. If `--web-port` is omitted, the helper selects a
+free host port from 8080, skipping listeners reserved by other configured
+installations, including stopped ones. Defaults are host networking and web bind
+`127.0.0.1`; select `--web-bind 0.0.0.0` or a local address for remote access.
+
+Creation and reconfiguration accept `--network-mode`, `--network-name`,
+`--container-ip`, `--web-bind`, `--web-port`, `--multicast-interface`, and
+`--video-path`. The same multicast/network requirements described above apply.
+For example, place a named recording tree on a dedicated mounted disk:
+
+```sh
+sudo t-delayerctl create archive --web-port 9030 --video-path /srv/archive-video
+sudo t-delayerctl configure test --web-port 9021
+sudo t-delayerctl restart test
+```
+
+Named reconfiguration preserves settings not specified and keeps credentials.
+It takes effect on restart. Configuration changes never move existing recordings.
+A restart interrupts that installation's recording/playback and reapplies stream
+autostart settings; temporary playback positions are not restored. Other
+installations continue running.
+
+```sh
+sudo t-delayerctl status production
+sudo t-delayerctl logs production
+sudo t-delayerctl stop test
+sudo t-delayerctl start test
+sudo systemctl disable t-delayer@test.service   # Disable this installation at boot
+sudo journalctl -u t-delayer@production.service -n 100
+```
+
+| Resource | Default | Named `production` |
+| --- | --- | --- |
+| Container | `t-delayer` | `t-delayer-production` |
+| Host configuration | `/etc/t-delayer/` | `/etc/t-delayer/installations/production/` |
+| Database, auth, credentials | `/var/lib/t-delayer/` | `/var/lib/t-delayer/installations/production/` |
+| Default recording path | `/var/lib/t-delayer/video` | `/var/lib/t-delayer/installations/production/video` |
+| Host service | `t-delayer-docker.service` | `t-delayer@production.service` |
+| Managed bridge | `t-delayer-bridge` | `t-delayer-production-bridge` |
+
+The helper rejects overlapping recording/private-data paths, conflicting host
+web listeners, and duplicate static IPs on the same Docker network before
+replacing a container. The database uses a private Unix socket in every
+container, so additional database TCP ports are unnecessary. Choose distinct
+multicast output host:port destinations across installations; output validation
+inside a single UI does not inspect other independent databases.
+
+All installations share the package's verified runtime image. A package upgrade
+recreates the default installation as before. Running named installations keep
+their current containers until individually restarted; their next start uses the
+updated image. The package does not pin separate image versions per installation.
+
+Package removal stops/disables all owned installation services and removes their
+containers. Purge also removes generated `config.json` files and storage drop-ins.
+Both retain databases, credentials, auth, bootstraps, recording files and images.
+To reconnect retained named data after purge, use `configure NAME` with its
+previous network/recording settings, then `systemctl enable --now t-delayer@NAME`;
+`create` refuses to overwrite retained credentials.
+
 ## Change configuration after installation
 
 To change network mode, network name, static IP, UI listener, multicast interface,
@@ -206,7 +292,7 @@ t-delayer-docker t-delayer-docker/web-port string 8080
 t-delayer-docker t-delayer-docker/multicast-interface string 192.168.42.99
 t-delayer-docker t-delayer-docker/video-path string /srv/delayer-video
 EOF
-sudo env DEBIAN_FRONTEND=noninteractive apt install ./t-delayer-docker_4.1.2-1ubuntu24.04_amd64.deb
+sudo env DEBIAN_FRONTEND=noninteractive apt install ./t-delayer-docker_4.2.0-1ubuntu24.04_amd64.deb
 ```
 
 For `existing`, also preseed `network-name` and optionally `container-ip`.
@@ -239,7 +325,7 @@ it is not automatically restarted by the controller. Docker health and UI status
 should both be monitored. `active (exited)` is normal for the oneshot host unit;
 use `t-delayerctl status` for current container health. Docker logs rotate locally.
 
-Persistent host locations:
+Persistent host locations for the default installation:
 
 | Host path | Contents |
 | --- | --- |
@@ -250,9 +336,10 @@ Persistent host locations:
 | `/var/lib/t-delayer/auth` | UI password hash |
 | Chosen recording directory | Chunk files; default `/var/lib/t-delayer/video` |
 
-For a consistent filesystem backup, stop the service, back up `/etc/t-delayer`,
-all of `/var/lib/t-delayer`, and the recording directory if elsewhere, then start
-the service. Preserve ownership and permissions, including PostgreSQL's numeric
+For a consistent filesystem backup of one installation, stop its service and
+back up its configuration, state directory and recording directory if elsewhere,
+then start the service. A backup of all of `/etc/t-delayer` and `/var/lib/t-delayer`
+includes named installations; stop all listed installation services first. Preserve ownership and permissions, including PostgreSQL's numeric
 UID. Restore using the same Ubuntu/package release. Keep credentials with the
 database: generating a new bootstrap password does not change an existing DB.
 
@@ -286,7 +373,7 @@ Perform this procedure in a maintenance window and verify restored instances
 and playback before discarding the old cluster.
 
 Remove with `sudo apt remove t-delayer-docker`. Removal stops and removes the
-owned container. `sudo apt purge t-delayer-docker` additionally clears debconf
+owned containers, including named installations. `sudo apt purge t-delayer-docker` additionally clears debconf
 answers and generated host configuration. **Both preserve database files,
 credentials, auth data, recordings, and loaded Docker images.** The owned bridge
 network is retained and can be reused on reinstall. External networks are never

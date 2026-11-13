@@ -1,4 +1,4 @@
-ARG RUNTIME_IMAGE=t-delayer:runtime-base-4.1.2-ubuntu26.04-amd64
+ARG RUNTIME_IMAGE=t-delayer:runtime-base-4.2.0-ubuntu26.04-amd64
 FROM ${RUNTIME_IMAGE}
 USER root
 # PostgreSQL is supervised by single-entrypoint.py, not systemd.

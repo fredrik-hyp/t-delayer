@@ -9,6 +9,24 @@ if [ "$1" = purge ]; then
     rm -f /etc/systemd/system/t-delayer-docker.service.d/storage.conf
     rmdir /etc/systemd/system/t-delayer-docker.service.d 2>/dev/null || true
     rmdir /etc/t-delayer 2>/dev/null || true
+    # Named installations retain their bootstrap, credentials, databases and recordings.
+    python3 - <<'PY'
+from pathlib import Path
+import re
+root = Path('/etc/t-delayer/installations')
+if root.is_dir():
+    for directory in root.iterdir():
+        if not directory.is_dir() or directory.is_symlink() or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,39}', directory.name):
+            continue
+        (directory / 'config.json').unlink(missing_ok=True)
+        dropin = Path('/etc/systemd/system') / ('t-delayer@' + directory.name + '.service.d')
+        (dropin / 'storage.conf').unlink(missing_ok=True)
+        for path in (dropin, directory):
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+PY
 fi
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload

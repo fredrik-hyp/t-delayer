@@ -14,6 +14,7 @@ class ValidationTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime.now(timezone.utc).replace(tzinfo=None)
         self.stat = {'startpos': self.now - timedelta(minutes=5), 'lastpos': self.now}
+        self.msbuffer = 3600_000
 
     def test_time_requires_timezone_and_normalizes_utc(self):
         self.assertEqual(parse_time('2026-11-05T13:00:00+01:00', 'time'), datetime(2026,11,5,12))
@@ -22,18 +23,43 @@ class ValidationTests(unittest.TestCase):
                 parse_time(value, 'time')
 
     def test_jump_bounds_and_wall_clock_stop(self):
-        self.assertRaises(APIError, validate_command, {'action':'jump'}, self.stat)
-        self.assertRaises(APIError, validate_command, {'action':'jump', 'jumptopos':(self.now + timedelta(seconds=10)).isoformat()+'Z'}, self.stat)
+        self.assertRaises(APIError, validate_command, {'action':'jump'}, self.stat, self.msbuffer)
+        self.assertRaises(APIError, validate_command, {'action':'jump', 'jumptopos':(self.now + timedelta(seconds=10)).isoformat()+'Z'}, self.stat, self.msbuffer)
         result = validate_command({'action':'jump', 'jumptopos':(self.now-timedelta(seconds=20)).isoformat()+'Z',
                                    'startplayat':(self.now+timedelta(seconds=20)).isoformat()+'Z',
-                                   'playto':(self.now+timedelta(seconds=30)).isoformat()+'Z'}, self.stat)
+                                   'playto':(self.now+timedelta(seconds=30)).isoformat()+'Z'}, self.stat, self.msbuffer)
         self.assertEqual(result['action'], 'jump')
-        self.assertRaises(APIError, validate_command, {'action':'playto','playto':(self.now-timedelta(seconds=10)).isoformat()+'Z'}, self.stat)
-        self.assertIsNone(validate_command({'action':'playto'}, self.stat)['playto'])
+        for stop_seconds in [10, 20]:
+            with self.subTest(stop_seconds=stop_seconds), self.assertRaises(APIError) as error:
+                validate_command({'action':'jump', 'jumptopos':(self.now-timedelta(seconds=20)).isoformat()+'Z',
+                                  'startplayat':(self.now+timedelta(seconds=20)).isoformat()+'Z',
+                                  'playto':(self.now+timedelta(seconds=stop_seconds)).isoformat()+'Z'}, self.stat, self.msbuffer)
+            self.assertEqual(error.exception.status, 400)
+            self.assertIn('stop time must be after', error.exception.message)
+        self.assertRaises(APIError, validate_command, {'action':'playto','playto':(self.now-timedelta(seconds=10)).isoformat()+'Z'}, self.stat, self.msbuffer)
+        self.assertIsNone(validate_command({'action':'playto'}, self.stat, self.msbuffer)['playto'])
+
+    def test_scheduled_jump_rejects_expiry_and_uses_configured_retention(self):
+        pos = self.now - timedelta(minutes=2)
+        expires = pos + timedelta(milliseconds=self.msbuffer)
+        body = {'action':'jump', 'jumptopos':pos.isoformat()+'Z'}
+        self.assertIsNone(validate_command(body, self.stat, self.msbuffer)['startplayat'])
+        # The recorded buffer spans only five minutes, but retention is an hour.
+        for start in [self.now + timedelta(minutes=10), expires - timedelta(microseconds=1)]:
+            with self.subTest(start=start):
+                result = validate_command(dict(body, startplayat=start.isoformat()+'Z'), self.stat, self.msbuffer)
+                self.assertEqual(result['startplayat'], start)
+        for start in [expires, expires + timedelta(seconds=1), expires + timedelta(days=1)]:
+            with self.subTest(start=start), self.assertRaises(APIError) as error:
+                validate_command(dict(body, startplayat=start.isoformat()+'Z'), self.stat, self.msbuffer)
+            self.assertEqual(error.exception.status, 409)
+            self.assertIn('expires from the buffer', error.exception.message)
+        with self.assertRaises(APIError):
+            validate_command(dict(body, startplayat=(self.now+timedelta(minutes=10)).isoformat()+'Z'), self.stat, 5*60_000)
 
     def test_unknown_action_and_fields_are_rejected(self):
         for body in [{'action':'restart'}, {'action':'pause','pid':1}, {'action':'play','jumptopos':'2026-11-05T12:00:00Z'}]:
-            self.assertRaises(APIError, validate_command, body, self.stat)
+            self.assertRaises(APIError, validate_command, body, self.stat, self.msbuffer)
 
     def test_ui_configuration_requires_input_outputs_and_rejects_unknown_fields(self):
         self.assertRaises(ValueError, validate_configuration, {'name':'st1'})

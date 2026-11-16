@@ -106,18 +106,18 @@
       <div class="dialog-heading dialog-header"><div><p class="eyebrow" id="target-name"></p><h2 id="dialog-title">Control output</h2></div><button type="button" data-close-command class="close" aria-label="Close">×</button></div><div class="dialog-body">
       <p>All times below are in UTC.</p>
       <p id="command-help"></p>
-      <fieldset id="jump-field" class="utc-date-time"><legend>Recorded time (UTC)</legend><div class="date-time-fields">
+      <fieldset id="jump-field" class="utc-date-time" aria-describedby="recorded-time-help"><legend>Recorded time in current buffer (UTC)</legend><div class="date-time-fields">
         <label>Date<input type="date" name="jumptopos_date" aria-label="Recorded date (UTC)"></label>
         <label>Time (UTC)<input type="time" name="jumptopos_time" aria-label="Recorded time of day (UTC)" step="1"></label>
-      </div></fieldset>
-      <fieldset id="schedule-field" class="utc-date-time"><legend>Start playback at (UTC, optional)</legend><div class="date-time-fields">
+      </div><small id="recorded-time-help">Choose the time when the video was recorded, within the buffer range above. Playback will begin from this position in the existing recording.</small></fieldset>
+      <fieldset id="schedule-field" class="utc-date-time" aria-describedby="playback-start-help schedule-error"><legend>Start playback at (UTC, optional)</legend><div class="date-time-fields">
         <label>Date<input type="date" name="startplayat_date" aria-label="Playback start date (UTC)"></label>
         <label>Time (UTC)<input type="time" name="startplayat_time" aria-label="Playback start time (UTC)" step="1"></label>
-      </div><small>Leave both fields blank to jump to the position and pause. Select Play to resume.</small></fieldset>
-      <fieldset id="end-field" class="utc-date-time"><legend>Stop at wall-clock time (UTC, optional)</legend><div class="date-time-fields">
+      </div><small id="playback-start-help">Set a future wall-clock time to start playing from the recorded position. The recording must still be in the buffer at that time. Leave both fields blank to jump to the position and pause. Select Play to resume.</small><p id="schedule-error" class="schedule-error" role="alert" aria-atomic="true" hidden></p></fieldset>
+      <fieldset id="end-field" class="utc-date-time" aria-describedby="stop-time-help stop-time-error"><legend>Stop at wall-clock time (UTC, optional)</legend><div class="date-time-fields">
         <label>Date<input type="date" name="playto_date" aria-label="Stop date (UTC)"></label>
         <label>Time (UTC)<input type="time" name="playto_time" aria-label="Stop time (UTC)" step="1"></label>
-      </div><small>Leave both fields blank to clear any stop time.</small></fieldset>
+      </div><small id="stop-time-help">For scheduled playback, the stop time must be after Start playback at. Leave both fields blank to clear any stop time.</small><p id="stop-time-error" class="schedule-error" role="alert" aria-atomic="true" hidden></p></fieldset>
       <p class="form-error" id="form-error" role="alert"></p>
       </div><div class="dialog-actions dialog-footer"><button type="button" data-close-command class="cancel">Cancel</button><button type="submit" class="primary">Send command</button></div>
     </form>

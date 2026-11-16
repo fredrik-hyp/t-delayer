@@ -4,7 +4,7 @@ Commands use the existing delayercoms / SIGUSR1 protocol. Never spawn a process
 from a request-supplied command or PID, and never run multiple API workers.
 """
 from contextlib import contextmanager, ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import grp
 import hashlib
 from http.server import BaseHTTPRequestHandler
@@ -352,7 +352,7 @@ class Instance:
                     raise APIError(409, "Wait until the instance has fresh status")
                 if not outputs[path]["status"].get("startpos") or not outputs[path]["status"].get("currpos"):
                     raise APIError(409, "No recorded data in the buffer yet")
-                command = validate_command(body, outputs[path]["status"])
+                command = validate_command(body, outputs[path]["status"], snapshot["msbuffer"])
                 cur.execute("""INSERT INTO delayercoms
                     (streaminterface_id,pathnumber,action,jumptopos,startplayat,playto)
                     VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
@@ -384,7 +384,7 @@ def parse_time(value, field):
         raise APIError(400, f"{field}: use ISO 8601 with a time zone")
 
 
-def validate_command(body, stat):
+def validate_command(body, stat, msbuffer):
     action = body.get("action")
     if action not in ("jump", "play", "pause", "playto"):
         raise APIError(400, "Choose jump, play, pause or playto")
@@ -400,6 +400,9 @@ def validate_command(body, stat):
             raise APIError(409, "The time is outside the available buffer")
         if result["startplayat"] and result["startplayat"] <= datetime.now(timezone.utc).replace(tzinfo=None):
             raise APIError(400, "The scheduled start must be in the future")
+        if result["startplayat"] and result["startplayat"] - pos >= timedelta(milliseconds=msbuffer):
+            raise APIError(409, "The recorded time expires from the buffer before scheduled playback. "
+                           "Choose an earlier playback start or a later recorded time.")
     elif result["jumptopos"] or result["startplayat"]:
         raise APIError(400, "Recorded time and scheduled start can only be used with jump")
     if action == "pause" and result["playto"]:

@@ -23,7 +23,9 @@ Screenshots go to the system temporary directory, or `UI_SCREENSHOT_DIR`.
 The browser suite serves the actual production HTML, CSS and JavaScript with
 nginx's Content Security Policy. All API calls use test responses; it never
 connects to a real delayer or database. It checks authentication, command and
-configuration forms, UTC payloads, expired-position recovery, both buffer views,
+configuration forms, UTC payloads, expired-position recovery, scheduled buffer
+expiry validation (including retention changes and blocked submissions), stop times
+after scheduled starts, both buffer views,
 selection and focus across polling, responsive layouts from 320 to 1440 pixels,
 stale/disconnected status, untrusted text, and session expiration.
 

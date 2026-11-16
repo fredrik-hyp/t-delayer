@@ -1,8 +1,9 @@
-import {classifyPlayback, formatDelay, buildMarkerLayout} from './buffer-model.js';
+import {classifyPlayback, formatDelay, buildMarkerLayout, scheduledBufferExpiry} from './buffer-model.js';
 
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
 const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, importing: null, authenticated: false, authGeneration: 0, bufferView: 'timeline', selectedOutputs: new Map(), activity: []};
+let commandSubmitting = false;
 const processLabels = {running: 'Running', starting: 'Starting / waiting for status', stopped: 'Stopped', exited: 'Process exited'};
 const outputLabels = {Live: 'Live', Play: 'Delayed', Pause: 'Paused'};
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -58,6 +59,42 @@ function readUtcInput(form, key, label) {
   }
   // Date and time fields supply wall-clock values; interpret them together in UTC.
   return new Date(`${date}T${time}Z`).toISOString();
+}
+
+function updateScheduleValidation() {
+  const error = $('#schedule-error');
+  const form = $('#command-form');
+  const instance = state.instances.find(i => i.name === state.target?.name);
+  const [recordedMs, playbackMs, stopMs] = ['jumptopos', 'startplayat', 'playto'].map(key => {
+    const date = form.elements[`${key}_date`].value;
+    const time = form.elements[`${key}_time`].value;
+    return date && time ? Date.parse(`${date}T${time}Z`) : NaN;
+  });
+  const expiresMs = state.target?.action === 'jump'
+    ? scheduledBufferExpiry(recordedMs, playbackMs, instance?.msbuffer) : null;
+  const bufferHours = instance?.msbuffer / 3600_000;
+  const bufferLabel = bufferHours < 1
+    ? `${Number((bufferHours * 60).toFixed(2))}-minute buffer`
+    : `${Number(bufferHours.toFixed(2))}-hour buffer`;
+  const message = expiresMs === null ? '' : `Cannot schedule playback: the recorded time expires from the buffer around ${timeText(expiresMs)} with the current ${bufferLabel}. Playback must start before this time. Choose an earlier playback start or a later recorded time.`;
+  if (error.textContent !== message) error.textContent = message;
+  error.hidden = !message;
+  form.elements.startplayat_time.setCustomValidity(message);
+  for (const key of ['startplayat_date', 'startplayat_time']) {
+    form.elements[key].setAttribute('aria-invalid', String(Boolean(message)));
+  }
+  const stopMessage = state.target?.action === 'jump' && Number.isFinite(playbackMs)
+    && Number.isFinite(stopMs) && stopMs <= playbackMs
+    ? `Cannot set stop time: it must be after Start playback at (${timeText(playbackMs)}). Choose a later stop time or an earlier playback start.` : '';
+  const stopError = $('#stop-time-error');
+  if (stopError.textContent !== stopMessage) stopError.textContent = stopMessage;
+  stopError.hidden = !stopMessage;
+  form.elements.playto_time.setCustomValidity(stopMessage);
+  for (const key of ['playto_date', 'playto_time']) {
+    form.elements[key].setAttribute('aria-invalid', String(Boolean(stopMessage)));
+  }
+  $('button[type=submit]', form).disabled = commandSubmitting || Boolean(message || stopMessage);
+  return !message && !stopMessage;
 }
 
 async function api(path, body) {
@@ -359,6 +396,7 @@ async function refresh() {
     $('#connection').className = 'connection-pill online';
     for (const button of document.querySelectorAll('[data-global-action]')) button.disabled = false;
     render();
+    if ($('#command-dialog').open) updateScheduleValidation();
   } catch (error) {
     if (!state.authenticated || generation !== state.authGeneration) return;
     state.connected = false;
@@ -413,8 +451,8 @@ $('#instances').addEventListener('click', async event => {
     const form = $('#command-form');
     form.reset();
     $('#target-name').textContent = `${name} / #${path} ${output.name}`;
-    $('#dialog-title').textContent = action === 'jump' ? 'Jump to recorded time (UTC)' : 'Set stop time (UTC)';
-    $('#command-help').textContent = action === 'jump' ? `Available: ${timeText(output.status.startpos)} – ${timeText(output.status.lastpos)}` : 'The output pauses at the selected wall-clock time in UTC. Leave both date and time blank to clear the stop time.';
+    $('#dialog-title').textContent = action === 'jump' ? 'Jump to a time in the buffer (UTC)' : 'Set stop time (UTC)';
+    $('#command-help').textContent = action === 'jump' ? `Currently in buffer: ${timeText(output.status.startpos)} – ${timeText(output.status.lastpos)}. Older recordings are removed as the buffer moves forward.` : 'The output pauses at the selected wall-clock time in UTC. Leave both date and time blank to clear the stop time.';
     $('#jump-field').hidden = action !== 'jump';
     $('#schedule-field').hidden = action !== 'jump';
     form.elements.jumptopos_date.required = action === 'jump';
@@ -431,16 +469,21 @@ $('#instances').addEventListener('click', async event => {
     setUtcInput(form, 'jumptopos', action === 'jump' ? current : null);
     setUtcInput(form, 'playto', output.status.playto);
     $('#form-error').textContent = '';
+    updateScheduleValidation();
     $('#command-dialog').showModal();
     return;
   }
   try { await send(name,path,{action}); } catch (error) { notify(error.message,true); }
 });
+$('#command-form').addEventListener('input', updateScheduleValidation);
+$('#command-form').addEventListener('change', updateScheduleValidation);
 $('#command-form').addEventListener('submit', async event => {
   event.preventDefault();
+  if (commandSubmitting || !updateScheduleValidation()) return;
   const target = state.target;
   const form = event.target;
   const submit = $('button[type=submit]',form);
+  commandSubmitting = true;
   submit.disabled = true;
   try {
     const body = {action: target.action};
@@ -459,7 +502,10 @@ $('#command-form').addEventListener('submit', async event => {
     await send(target.name,target.path,body);
     $('#command-dialog').close();
   } catch (error) { $('#form-error').textContent = error.message; }
-  finally { submit.disabled = false; }
+  finally {
+    commandSubmitting = false;
+    updateScheduleValidation();
+  }
 });
 for (const button of document.querySelectorAll('[data-close-command]')) button.addEventListener('click',() => $('#command-dialog').close());
 

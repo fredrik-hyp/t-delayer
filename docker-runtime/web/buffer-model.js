@@ -2,6 +2,15 @@ const DEFAULT_LIVE_TOLERANCE_MS = 2_000;
 const LABEL_HALF_WIDTH_PERCENT = 12;
 const LABEL_SPACING_PERCENT = 26;
 
+// Retention is an age limit, not the duration currently recorded in the buffer.
+// Cleanup removes whole chunks, so this is a conservative expiry estimate.
+export function scheduledBufferExpiry(recordedMs, playbackMs, retentionMs, nowMs = Date.now()) {
+  if (![recordedMs, playbackMs, retentionMs, nowMs].every(Number.isFinite)
+      || retentionMs <= 0 || playbackMs <= nowMs) return null;
+  const expiresMs = recordedMs + retentionMs;
+  return playbackMs >= expiresMs ? expiresMs : null;
+}
+
 export function classifyPlayback(
   positionMs,
   oldestMs,

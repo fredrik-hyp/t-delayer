@@ -1,8 +1,27 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {classifyPlayback, buildMarkerLayout, formatDelay} from '../web/buffer-model.js';
+import {classifyPlayback, buildMarkerLayout, formatDelay, scheduledBufferExpiry} from '../web/buffer-model.js';
 
 const bounds = {oldestMs: 10_000, newestMs: 110_000};
+test('scheduled playback is invalid at or after the recorded position expires', () => {
+  const recorded = Date.parse('2026-11-16T09:30:00Z');
+  const now = Date.parse('2026-11-16T09:55:00Z');
+  const retention = 3600_000;
+  const expires = Date.parse('2026-11-16T10:30:00Z');
+  assert.equal(scheduledBufferExpiry(recorded, expires - 1, retention, now), null);
+  assert.equal(scheduledBufferExpiry(recorded, expires, retention, now), expires);
+  assert.equal(scheduledBufferExpiry(recorded, expires + 86400_000, retention, now), expires);
+  // A buffer that is still filling must use configured retention, not its span.
+  assert.equal(scheduledBufferExpiry(recorded, now + 10 * 60_000, retention, now), null);
+  assert.equal(scheduledBufferExpiry(recorded, now + 10 * 60_000, 30 * 60_000, now), recorded + 30 * 60_000);
+  for (const args of [
+    [NaN, expires, retention, now], [recorded, NaN, retention, now],
+    [recorded, expires, undefined, now], [recorded, expires, 0, now],
+    [recorded, expires, -1, now], [recorded, expires, retention, NaN],
+    [recorded, now, 1000, now], [recorded, now - 1, 1000, now],
+  ]) assert.equal(scheduledBufferExpiry(...args), null);
+});
+
 test('buffer boundaries distinguish expired, delayed, live and unavailable positions', () => {
   assert.equal(classifyPlayback(9_999,10_000,110_000).state,'expired');
   assert.equal(classifyPlayback(10_000,10_000,110_000).state,'available');

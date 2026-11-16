@@ -72,6 +72,12 @@ alla outputs fortfarande väljas i listan. En överskriven position markeras
 **Expired**; **Recover** öppnar hoppdialogen med en giltig tid vid buffertens
 början. Kommandot följer samma jump/schedule-regler som övrig uppspelning.
 Vid inaktuell status eller anslutningsfel spärras uppspelningskommandon.
+**Play** och **Pause** skyddas av **Arm** för respektive output. Välj Arm
+för att låsa upp knapparna i 20 sekunder eller för ett kommando. Den gula
+markeringen visar att skyddet är öppet. Skyddet stängs även vid ett misslyckat
+kommando, Escape, byte av output eller vy, när fönstret lämnas och vid förlorad
+anslutning eller inaktuell status. Jump / schedule och Play until har kvar sina
+egna dialoger.
 Instansens gröna **Running**-märke växlar till rött **No input** när aktuell
 inputstatistik visar 0 bit/s. Märket och kortets vänsterrand blinkar rött i
 samma takt, en gång per sekund, och återgår

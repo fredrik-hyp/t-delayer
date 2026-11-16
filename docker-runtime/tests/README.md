@@ -27,6 +27,7 @@ configuration forms, UTC payloads, expired-position recovery, scheduled buffer
 expiry validation (including retention changes and blocked submissions), stop times
 after scheduled starts, both buffer views,
 selection and focus across polling, responsive layouts from 320 to 1440 pixels,
+single-use Play/Pause arming, automatic disarming, and stop confirmation,
 stale/disconnected status, untrusted text, and session expiration.
 
 For real Linux builds, multicast playback, chunk analysis, authentication and

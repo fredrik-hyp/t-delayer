@@ -42,7 +42,7 @@ test('production cockpit integrates design and existing API contracts',async t =
   const errors = [];
   page.on('pageerror',e => errors.push(e.message));
   page.on('console',msg => {if (msg.type()==='error' && /Content Security Policy|Refused to/.test(msg.text())) errors.push(msg.text());});
-  let data = fixture(), authenticated = false, offline = false, expire = false;
+  let data = fixture(), authenticated = false, offline = false, expire = false, stopError = false, commandError = false, releaseStop = null;
   const requests = [];
   await page.route('**/api/**',async route => {
     const req = route.request(), path = new URL(req.url()).pathname;
@@ -56,9 +56,16 @@ test('production cockpit integrates design and existing API contracts',async t =
       if (expire) {await route.fulfill({status:401,json:{error:'Session expired'}});return;}
       if (offline) {await route.fulfill({status:503,json:{error:'Service unavailable'}});return;}
       result=data;
+    } else if (path.endsWith('/stop')) {
+      if (stopError) {await route.fulfill({status:503,json:{error:'Could not stop instance. Try again.'}});return;}
+      await new Promise(resolve => {releaseStop=resolve;});
+      result={stopped:true};
     } else if (path === '/api/configuration') result={instances:[]};
     else if (path === '/api/auth/password') result={authenticated:true,username:'admin'};
-    else if (path.endsWith('/commands')) result={command_id:42};
+    else if (path.endsWith('/commands')) {
+      if (commandError) {await route.fulfill({status:503,json:{error:'Command unavailable'}});return;}
+      result={command_id:42};
+    }
     else if (path.includes('/configuration/import')) result={imported:['st2']};
     else result={saved:true};
     await route.fulfill({json:result});
@@ -81,6 +88,65 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.equal(await page.locator('[data-instance="st1"] [data-output="0"] [data-action="play"]').isDisabled(),true);
     assert.equal(await page.locator('.timeline-marker').count(),2);
     await page.screenshot({path:join(screenshots,'delayer-cockpit-desktop.png'),fullPage:true});
+  });
+  await t.test('stop confirmation identifies the instance and defaults to keeping it running',async () => {
+    const trigger = page.locator('[data-instance="st1"] [data-action="stop"]');
+    const dialog = page.locator('#stop-dialog');
+    const cancel = dialog.getByRole('button',{name:'Keep running',exact:true});
+    const confirm = page.locator('#stop-submit');
+    const stopRequests = () => requests.filter(r => r.path.endsWith('/stop'));
+    const before = stopRequests().length;
+    await trigger.click();
+    assert.equal(await dialog.getAttribute('role'),'alertdialog');
+    assert.equal(await page.locator('#stop-title').textContent(),'Stop st1?');
+    assert.equal(await confirm.textContent(),'Stop st1');
+    assert.match(await page.locator('#stop-warning').textContent(),/Recording and all outputs will stop immediately/);
+    assert.equal(await cancel.evaluate(el => el === document.activeElement),true);
+    await page.screenshot({path:join(screenshots,'delayer-stop-dialog.png'),fullPage:true});
+    // Polling must not dismiss the dialog or break focus restoration.
+    await page.waitForTimeout(2200);
+    await page.keyboard.press('Enter');
+    await dialog.waitFor({state:'hidden'});
+    assert.equal(await trigger.evaluate(el => el === document.activeElement),true);
+    assert.equal(stopRequests().length,before);
+    await trigger.click();
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({state:'hidden'});
+    await trigger.click();
+    await dialog.getByRole('button',{name:'Cancel stopping instance',exact:true}).click();
+    await dialog.waitFor({state:'hidden'});
+    assert.equal(stopRequests().length,before);
+    await page.setViewportSize({width:320,height:640});
+    await trigger.click();
+    assert.equal(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth),true);
+    const bounds = await dialog.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
+    await page.screenshot({path:join(screenshots,'delayer-stop-dialog-mobile.png'),fullPage:true});
+    await cancel.click();
+    await page.setViewportSize({width:1440,height:1100});
+    stopError=true;
+    await trigger.click();
+    await confirm.click();
+    await page.locator('#stop-error').waitFor({state:'visible'});
+    assert.equal(await dialog.isVisible(),true);
+    assert.match(await page.locator('#stop-error').textContent(),/Could not stop instance/);
+    assert.equal(await confirm.isEnabled(),true);
+    stopError=false;
+    try {
+      await confirm.click();
+      await page.waitForFunction(() => document.querySelector('#stop-submit').textContent === 'Stopping…');
+      assert.equal(await confirm.isDisabled(),true);
+      assert.equal(await cancel.isDisabled(),true);
+      await page.keyboard.press('Escape');
+      assert.equal(await dialog.isVisible(),true);
+      assert.equal(stopRequests().length,before+2);
+      assert.deepEqual(stopRequests().at(-1).body,{});
+      assert.equal(stopRequests().at(-1).path,'/api/instances/st1/stop');
+      await page.waitForTimeout(50);
+      releaseStop();
+      await dialog.waitFor({state:'hidden'});
+      assert.equal(await trigger.evaluate(el => el === document.activeElement),true);
+    } finally {releaseStop?.();}
   });
   await t.test('timeline selection, tooltip and recovery prefill stay in UTC',async () => {
     const marker = page.locator('.timeline-marker[data-path="2"]');
@@ -242,7 +308,91 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.equal(await page.locator('[name="playto_time"]').getAttribute('aria-invalid'),'false');
     await page.keyboard.press('Escape');
   });
+  await t.test('Play and Pause require a temporary, single-use arm for the selected output',async () => {
+    const row=page.locator('[data-instance="st1"] [data-output="2"]');
+    const other=page.locator('[data-instance="st1"] [data-output="1"]');
+    const arm=row.locator('[data-action="arm"]');
+    const play=row.locator('[data-action="play"]');
+    const pause=row.locator('[data-action="pause"]');
+    const commands=()=>requests.filter(r=>r.path.endsWith('/commands'));
+    const before=commands().length;
+    assert.equal(await play.isDisabled(),true);
+    assert.equal(await pause.isDisabled(),true);
+    assert.equal(await arm.getAttribute('aria-pressed'),'false');
+    // Even a stale DOM button enabled outside the renderer cannot skip arming.
+    await play.evaluate(el=>{el.disabled=false;el.click();});
+    assert.equal(commands().length,before);
+    assert.equal(await play.isDisabled(),true);
+    await arm.focus();
+    await page.keyboard.press('Space');
+    assert.equal(await arm.getAttribute('aria-pressed'),'true');
+    assert.equal(await arm.locator('.arm-label').textContent(),'Armed · 20s');
+    assert.equal(await play.isEnabled(),true);
+    assert.equal(await pause.isEnabled(),true);
+    assert.equal(await other.locator('[data-action="play"]').isDisabled(),true);
+    await page.waitForTimeout(2200);
+    assert.equal(await arm.getAttribute('aria-pressed'),'true','polling keeps the guard open');
+    assert.equal(await arm.evaluate(el=>el===document.activeElement),true);
+    await row.screenshot({path:join(screenshots,'delayer-playback-armed.png')});
+    await row.locator('.row-actions').screenshot({path:join(screenshots,'delayer-playback-armed-controls.png')});
+    await page.keyboard.press('Space');
+    assert.equal(await play.isDisabled(),true,'a second activation closes the lid');
+    assert.equal(commands().length,before);
+    await arm.click();
+    await other.locator('[data-action="arm"]').click();
+    assert.equal(await play.isDisabled(),true,'only one output can be armed');
+    await page.keyboard.press('Escape');
+    assert.equal(await other.locator('[data-action="pause"]').isDisabled(),true);
+    await arm.click();
+    await page.locator('#tab-resources').click();
+    await page.locator('#tab-instances').click();
+    assert.equal(await play.isDisabled(),true,'changing tabs closes the lid');
+    await arm.click();
+    await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+    assert.equal(await play.isDisabled(),true,'leaving the window closes the lid');
+    await arm.click();
+    await page.keyboard.press('Tab');
+    assert.equal(await play.evaluate(el=>el===document.activeElement),true);
+    await page.waitForTimeout(10000);
+    assert.equal(await play.isEnabled(),true,'arming lasts longer than the previous eight-second window');
+    await page.waitForFunction(()=>document.querySelector('[data-instance="st1"] [data-output="2"] [data-action="play"]').disabled,null,{timeout:15000});
+    assert.equal(await arm.getAttribute('aria-pressed'),'false','arming expires without a command');
+    assert.equal(await arm.evaluate(el=>el===document.activeElement),true);
+    assert.equal(commands().length,before);
+    await arm.click();
+    await page.keyboard.press('Tab');
+    assert.equal(await play.evaluate(el=>el===document.activeElement),true);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(()=>document.querySelector('#notice').textContent.includes('#42'));
+    assert.equal(commands().length,before+1);
+    assert.deepEqual(commands().at(-1).body,{action:'play'});
+    assert.equal(await play.isDisabled(),true,'a command consumes the arm');
+    assert.equal(await pause.isDisabled(),true);
+    await arm.click();
+    commandError=true;
+    await pause.click();
+    await page.waitForFunction(()=>document.querySelector('#notice').textContent==='Command unavailable');
+    commandError=false;
+    assert.equal(await pause.isDisabled(),true,'a failed command also consumes the arm');
+    assert.equal(await arm.getAttribute('aria-pressed'),'false');
+    assert.equal(commands().length,before+2);
+    await row.screenshot({path:join(screenshots,'delayer-playback-locked.png')});
+    await row.locator('.row-actions').screenshot({path:join(screenshots,'delayer-playback-locked-controls.png')});
+    // Expired recordings still require recovery before Play, even when armed.
+    const expired=page.locator('[data-instance="st1"] [data-output="0"]');
+    await expired.locator('[data-action="arm"]').click();
+    assert.equal(await expired.locator('[data-action="play"]').isDisabled(),true);
+    assert.equal(await expired.locator('[data-action="pause"]').isEnabled(),true);
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({width:320,height:800});
+    await arm.click();
+    await row.screenshot({path:join(screenshots,'delayer-playback-mobile-320.png')});
+    assert.equal(await row.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({width:1440,height:1100});
+  });
   await t.test('independent play/pause and wall-clock scheduling preserve API payloads',async () => {
+    await page.locator('[data-output="2"] [data-action="arm"]').click();
     await page.locator('[data-output="2"] [data-action="pause"]').click();
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('#42'));
     assert.deepEqual(requests.findLast(r => r.path.endsWith('/outputs/2/commands')).body,{action:'pause'});
@@ -294,11 +444,27 @@ test('production cockpit integrates design and existing API contracts',async t =
     await page.locator('#tab-instances').click();
   });
   await t.test('responsive layout has no horizontal overflow in either visualization',async () => {
-    for (const width of [1440,1100,1024,768,375,320]) {
+    for (const width of [1440,1280,1100,1051,1024,768,640,375,320]) {
       await page.setViewportSize({width,height:1000});
       for (const view of ['timeline','ring']) {
         await page.locator(`[data-buffer-view="${view}"]`).click();
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true,`${view} at ${width}px`);
+        const layouts=await page.locator('.row-actions').evaluateAll(groups=>groups.map(group=>{
+          const box=selector=>group.querySelector(selector).getBoundingClientRect();
+          const guard=box('.playback-guard'),jump=box('[data-action="jump"]'),until=box('[data-action="playto"]');
+          return Math.abs(jump.left-until.left)<1 && Math.abs(jump.width-until.width)<1 &&
+            Math.abs(guard.top-jump.top)<1 && Math.abs(guard.bottom-until.bottom)<1 &&
+            guard.right<=jump.left && jump.bottom<until.top;
+        }));
+        assert.ok(layouts.every(Boolean),`aligned control groups in ${view} at ${width}px`);
+        if (view==='ring' && width>=1100) {
+          const centered=await page.locator('.output-row').evaluateAll(rows=>rows.map(row=>{
+            const info=row.querySelector('.output-position').getBoundingClientRect();
+            const controls=row.querySelector('.row-actions').getBoundingClientRect();
+            return Math.abs((info.top+info.bottom)-(controls.top+controls.bottom))<2 && controls.left>=info.right;
+          }));
+          assert.ok(centered.every(Boolean),`ring controls beside playback information at ${width}px`);
+        }
       }
     }
     await page.setViewportSize({width:375,height:1000});
@@ -340,7 +506,10 @@ test('production cockpit integrates design and existing API contracts',async t =
     await page.emulateMedia({reducedMotion:'no-preference'});
     assert.equal(await card.evaluate(el=>getComputedStyle(el).borderLeftColor),'rgb(239, 116, 116)');
     assert.equal(await card.locator('[data-action="stop"]').isEnabled(),true);
+    assert.equal(await card.locator('[data-output="2"] [data-action="play"]').isDisabled(),true);
+    await card.locator('[data-output="2"] [data-action="arm"]').click();
     assert.equal(await card.locator('[data-output="2"] [data-action="play"]').isEnabled(),true);
+    await page.keyboard.press('Escape');
     assert.equal(await page.locator('#running-summary').textContent(),'1 / 2');
     assert.equal(await page.locator('#health-value').textContent(),'Needs attention');
     await card.locator('.instance-header').screenshot({path:join(screenshots,'delayer-no-input.png')});
@@ -368,16 +537,19 @@ test('production cockpit integrates design and existing API contracts',async t =
     await page.waitForFunction(() => document.querySelector('[data-instance="st1"] .state-chip').textContent==='Running');
   });
   await t.test('stale and disconnected status hide geometry and disable writes',async () => {
+    await page.locator('[data-instance="st1"] [data-output="2"] [data-action="arm"]').click();
     for (const output of data.instances[0].outputs) {output.stale=true;output.ready=false;}
     await page.waitForTimeout(2200);
     assert.equal(await page.locator('.timeline-marker').count(),0);
     assert.equal(await page.locator('[data-output="2"] [data-action="play"]').isDisabled(),true);
+    assert.equal(await page.locator('[data-output="2"] [data-action="arm"]').getAttribute('aria-pressed'),'false');
     offline=true;
     await page.waitForFunction(() => document.querySelector('#connection').classList.contains('offline'));
     assert.equal(await page.locator('[data-instance="st2"] [data-action="start"]').isDisabled(),true);
     assert.equal(await page.locator('#storage-summary').textContent(),'—');
     offline=false;data=fixture();
     await page.waitForFunction(() => document.querySelector('.timeline-marker'));
+    assert.equal(await page.locator('[data-output="2"] [data-action="play"]').isDisabled(),true,'reconnection does not re-arm');
   });
   await t.test('untrusted server text is escaped, eight clustered outputs fit and empty states render',async () => {
     data.instances[0].outputs=Array.from({length:8},(_,index)=>output(index,newest));
@@ -426,9 +598,12 @@ test('production cockpit integrates design and existing API contracts',async t =
   });
   await t.test('expired sessions clear operational data and dialogs',async () => {
     await page.locator('#notifications-button').click();
+    await page.keyboard.press('Escape');
+    await page.locator('[data-instance="st1"] [data-action="stop"]').click();
     expire=true;
     await page.locator('#login-view').waitFor();
     assert.equal(await page.locator('#notification-drawer').isVisible(),false);
+    assert.equal(await page.locator('#stop-dialog').isVisible(),false);
     assert.equal(await page.locator('.instance-card').count(),0);
     assert.match(await page.locator('#login-error').textContent(),/expired/);
     assert.equal(await page.locator('#notification-count').textContent(),'0');

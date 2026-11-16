@@ -10,6 +10,7 @@
 </head>
 <body class="signed-out">
   <a class="skip-link" href="#dashboard">Skip to control room</a>
+  <p id="playback-guard-help" class="sr-only">Arm unlocks Play and Pause for this output for twenty seconds or one command. Press Escape or select Arm again to lock them.</p>
   <header class="app-header">
     <div class="brand-lockup" aria-label="Polylegio Delayer"><span class="brand-mark" aria-hidden="true">PL</span><span class="brand-name">Polylegio <strong>Delayer</strong></span></div>
     <div class="header-status"><span id="connection" class="connection-pill" role="status" hidden>Connecting…</span><time class="utc-clock" id="utc-clock" aria-label="Current UTC time"></time></div>
@@ -98,6 +99,20 @@
       <input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" maxlength="1024" required>
       <p class="form-error" id="password-error" role="alert"></p>
       </div><div class="dialog-actions dialog-footer"><button type="button" data-close-password>Cancel</button><button type="submit" class="primary">Save password</button></div>
+    </form>
+  </dialog>
+  <dialog id="stop-dialog" role="alertdialog" aria-labelledby="stop-title" aria-describedby="stop-warning stop-help">
+    <form id="stop-form">
+      <div class="dialog-heading dialog-header">
+        <div class="stop-heading"><span class="stop-warning-icon" aria-hidden="true">⚠</span><div><p class="eyebrow">Service interruption</p><h2 id="stop-title">Stop instance?</h2></div></div>
+        <button type="button" data-close-stop class="close" aria-label="Cancel stopping instance">×</button>
+      </div>
+      <div class="dialog-body">
+        <div id="stop-warning" class="stop-warning"><strong>Recording and all outputs will stop immediately.</strong><ul><li>No new incoming video will be recorded.</li><li>All outputs from this instance will stop sending video.</li></ul></div>
+        <p id="stop-help">Only need to pause one output? Use Pause in that output’s row instead.</p>
+        <p class="form-error" id="stop-error" role="alert" hidden></p>
+      </div>
+      <div class="dialog-actions dialog-footer"><button type="button" data-close-stop autofocus>Keep running</button><button id="stop-submit" type="submit" class="stop-confirm danger">Stop instance</button></div>
     </form>
   </dialog>
   <dialog id="command-dialog" aria-labelledby="dialog-title" aria-describedby="command-help">

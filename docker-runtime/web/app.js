@@ -2,7 +2,9 @@ import {classifyPlayback, formatDelay, buildMarkerLayout, scheduledBufferExpiry}
 
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = {instances: [], connected: false, target: null, busy: new Set(), editing: null, importing: null, authenticated: false, authGeneration: 0, bufferView: 'timeline', selectedOutputs: new Map(), activity: []};
+const state = {instances: [], connected: false, target: null, stopping: null, armedPlayback: null, busy: new Set(), editing: null, importing: null, authenticated: false, authGeneration: 0, bufferView: 'timeline', selectedOutputs: new Map(), activity: []};
+const PLAYBACK_ARM_MS = 20000;
+let playbackArmTimer;
 let commandSubmitting = false;
 const processLabels = {running: 'Running', starting: 'Starting / waiting for status', stopped: 'Stopped', exited: 'Process exited'};
 const outputLabels = {Live: 'Live', Play: 'Delayed', Pause: 'Paused'};
@@ -119,6 +121,8 @@ function showLogin(message = '') {
   renderSystem(null);
   state.busy.clear();
   state.target = null;
+  state.stopping = null;
+  disarmPlayback();
   state.editing = null;
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
   $('#instances').replaceChildren();
@@ -283,6 +287,45 @@ function outputEnabled(instance, output) {
   return state.connected && instance.pid != null && output.ready && !output.stale &&
     Boolean(bufferBounds(instance)) && Number.isFinite(Date.parse(output.status.currpos)) && !state.busy.has(instance.name);
 }
+function playbackArmed(instance, output) {
+  const armed = state.armedPlayback;
+  return Boolean(armed && state.authenticated && armed.name === instance.name && armed.path === output.pathnumber &&
+    armed.pid === instance.pid && performance.now() < armed.expiresAt && outputEnabled(instance, output));
+}
+function disarmPlayback() {
+  state.armedPlayback = null;
+  clearTimeout(playbackArmTimer);
+  syncPlaybackGuards();
+}
+function syncPlaybackGuards() {
+  const armed = state.armedPlayback;
+  if (armed) {
+    const instance = state.instances.find(i => i.name === armed.name);
+    const output = instance?.outputs.find(o => o.pathnumber === armed.path);
+    if (!output || !playbackArmed(instance, output)) {
+      state.armedPlayback = null;
+      clearTimeout(playbackArmTimer);
+    }
+  }
+  for (const guard of document.querySelectorAll('.playback-guard')) {
+    const name = guard.closest('[data-instance]').dataset.instance;
+    const instance = state.instances.find(i => i.name === name);
+    const output = instance?.outputs.find(o => o.pathnumber === Number(guard.dataset.path));
+    const enabled = Boolean(output && outputEnabled(instance, output));
+    const open = Boolean(output && playbackArmed(instance, output));
+    guard.dataset.armed = String(open);
+    const toggle = $('[data-action="arm"]', guard);
+    toggle.disabled = !enabled;
+    toggle.setAttribute('aria-pressed', String(open));
+    toggle.setAttribute('aria-label', `${open ? 'Disarm' : 'Arm'} Play and Pause for ${name} / ${output?.name || 'output'}`);
+    $('.arm-label', toggle).textContent = open ? `Armed · ${Math.ceil((state.armedPlayback.expiresAt - performance.now()) / 1000)}s` : 'Arm';
+    for (const button of guard.querySelectorAll('[data-action="play"], [data-action="pause"]')) {
+      const wasFocused = button === document.activeElement;
+      button.disabled = !open || (button.dataset.action === 'play' && playback(instance, output).state === 'expired');
+      if (button.disabled && wasFocused && enabled) toggle.focus({preventScroll: true});
+    }
+  }
+}
 function markerData(instance, bounds) {
   return buildMarkerLayout(instance.outputs.map((output, index) => ({
     ...output, positionMs: output.ready && !output.stale ? Date.parse(output.status.currpos) : NaN,
@@ -319,12 +362,14 @@ function outputRow(instance, output) {
   const stat = output.status, metric = output.metrics;
   const position = playback(instance, output);
   const enabled = outputEnabled(instance, output);
-  const button = (action, text, unavailable = false) => `<button class="output-command" data-action="${action}" data-path="${output.pathnumber}" ${enabled && !unavailable ? '' : 'disabled'}>${text}</button>`;
+  const armed = playbackArmed(instance, output);
+  const button = (action, text, unavailable = false) => `<button type="button" class="output-command" data-action="${action}" data-path="${output.pathnumber}" ${enabled && !unavailable && (!['play','pause'].includes(action) || armed) ? '' : 'disabled'}>${text}</button>`;
+  const guard = `<div class="playback-guard" data-path="${output.pathnumber}" data-armed="${armed}" role="group" aria-label="Play and Pause safety guard"><button type="button" class="playback-arm output-command" data-action="arm" data-path="${output.pathnumber}" aria-pressed="${armed}" aria-describedby="playback-guard-help" ${enabled ? '' : 'disabled'}><svg class="guard-lock" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path class="guard-shackle" d="M6 9V6a4 4 0 0 1 8 0v3"/><rect x="4" y="9" width="12" height="9" rx="2"/><path d="M10 12v3"/></svg><span class="arm-label" aria-hidden="true">Arm</span><span class="guard-chevron" aria-hidden="true">⌃</span></button><div class="guarded-buttons">${button('play','Play',position.state === 'expired')}${button('pause','Pause')}</div></div>`;
   return `<article class="output-row" data-output="${output.pathnumber}" data-selected="${state.selectedOutputs.get(instance.name) === output.pathnumber}">
     <div class="output-name"><strong>${escapeHTML(output.name)}</strong><span>#${output.pathnumber} · ${escapeHTML(output.host)}:${output.port} · TTL ${output.ttl} · ${output.rawudp ? 'Raw UDP' : 'RTP preserved'}</span><span>${bps(metric.bitrateout)} out · ${bps(metric.bitratein)} in · UDP-drops ${escapeHTML(metric.udpdrops ?? '—')}</span></div>
     <span class="output-state" data-state="${position.state === 'live' && stat.state === 'Pause' ? 'available' : position.state}">${position.label}</span>
     <div class="output-position"><strong>${timeText(stat.currpos)}</strong><span>${position.delayMs == null ? 'Last reported position' : `${duration(position.delayMs / 1000)} behind buffer end`}</span>${position.state === 'expired' ? '<span class="output-warning">Position overwritten · recovery required</span>' : ''}<span>Start ${timeText(stat.startplayat)} · Stop ${timeText(stat.playto)}</span></div>
-    <div class="row-actions">${button('play','Play',position.state === 'expired')}${button('pause','Pause')}${button('jump',position.state === 'expired' ? 'Recover / schedule' : 'Jump / schedule')}${button('playto','Play until')}</div></article>`;
+    <div class="row-actions">${guard}${button('jump',position.state === 'expired' ? 'Recover / schedule' : 'Jump / schedule')}${button('playto','Play until')}</div></article>`;
 }
 function renderActivity() {
   const entries = [...state.activity, ...state.instances.flatMap(instance => instance.logs.map(log => ({timestamp: log.timestamp, title: instance.name, message: log.text})))].sort((a,b) => Date.parse(b.timestamp)-Date.parse(a.timestamp)).slice(0,100);
@@ -373,6 +418,7 @@ function render() {
     $('.timeline-marker',tooltip.parentElement).setAttribute('aria-describedby',tooltip.id);
   }
   renderActivity();
+  syncPlaybackGuards();
   if (focusKey) {
     const section = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === focusKey[0]);
     const next = section && [...section.querySelectorAll('button')].find(el => el.dataset.action === focusKey[1] && el.dataset.path === focusKey[2] && el.className === focusKey[3]);
@@ -430,6 +476,27 @@ $('#instances').addEventListener('click', async event => {
   const name = button.closest('[data-instance]').dataset.instance;
   const action = button.dataset.action;
   const path = button.dataset.path == null ? null : Number(button.dataset.path);
+  const instance = state.instances.find(i => i.name === name);
+  const output = instance?.outputs.find(o => o.pathnumber === path);
+  if (action === 'arm') {
+    if (!output || !outputEnabled(instance, output)) return;
+    const wasArmed = playbackArmed(instance, output);
+    disarmPlayback();
+    if (!wasArmed) {
+      state.armedPlayback = {name, path, pid: instance.pid, expiresAt: performance.now() + PLAYBACK_ARM_MS};
+      playbackArmTimer = setTimeout(disarmPlayback, PLAYBACK_ARM_MS);
+    }
+    selectOutput(name,path);
+    syncPlaybackGuards();
+    return;
+  }
+  // Check the deadline at activation as well as in the timer: background tabs
+  // may delay timers, and a held key or stale button must never bypass the guard.
+  if (['play','pause'].includes(action) && (!output || !playbackArmed(instance, output))) {
+    disarmPlayback();
+    return;
+  }
+  disarmPlayback();
   if (path != null) selectOutput(name,path);
   if (action === 'select') return;
   if (action === 'export') {
@@ -444,7 +511,16 @@ $('#instances').addEventListener('click', async event => {
     openConfiguration(state.instances.find(instance => instance.name === name));
     return;
   }
-  if (action === 'stop' && !confirm(`Stop ${name}? Recording and all outputs for this instance will stop.`)) return;
+  if (action === 'stop') {
+    state.stopping = name;
+    $('#stop-title').textContent = `Stop ${name}?`;
+    $('#stop-submit').textContent = `Stop ${name}`;
+    $('#stop-error').hidden = true;
+    $('#stop-error').textContent = '';
+    $('#stop-dialog').showModal();
+    $('#stop-dialog [data-close-stop][autofocus]').focus();
+    return;
+  }
   if (action === 'jump' || action === 'playto') {
     state.target = {name,path,action};
     const output = state.instances.find(i => i.name === name).outputs.find(o => o.pathnumber === path);
@@ -508,6 +584,44 @@ $('#command-form').addEventListener('submit', async event => {
   }
 });
 for (const button of document.querySelectorAll('[data-close-command]')) button.addEventListener('click',() => $('#command-dialog').close());
+
+for (const button of document.querySelectorAll('[data-close-stop]')) button.addEventListener('click',() => $('#stop-dialog').close());
+$('#stop-dialog').addEventListener('cancel', event => {
+  if ($('#stop-submit').disabled) event.preventDefault();
+});
+$('#stop-dialog').addEventListener('close', () => {
+  const name = state.stopping;
+  state.stopping = null;
+  // Polling replaces the original trigger, so restore focus to its current button.
+  if (!state.authenticated) return;
+  const card = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === name);
+  card?.querySelector('button[data-action="stop"], button[data-action="start"]')?.focus({preventScroll: true});
+});
+$('#stop-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const name = state.stopping;
+  const generation = state.authGeneration;
+  const submit = $('#stop-submit');
+  if (!name || submit.disabled || !state.authenticated) return;
+  $('#stop-error').hidden = true;
+  submit.disabled = true;
+  submit.textContent = 'Stopping…';
+  for (const button of document.querySelectorAll('[data-close-stop]')) button.disabled = true;
+  try {
+    if (!state.connected) throw new Error('Status unavailable. Wait for the connection to recover before stopping.');
+    await send(name,null,{action:'stop'});
+    if (state.authenticated && generation === state.authGeneration) $('#stop-dialog').close();
+  } catch (error) {
+    if (state.authenticated && generation === state.authGeneration && $('#stop-dialog').open) {
+      $('#stop-error').textContent = error.message;
+      $('#stop-error').hidden = false;
+    }
+  } finally {
+    submit.disabled = false;
+    submit.textContent = `Stop ${name}`;
+    for (const button of document.querySelectorAll('[data-close-stop]')) button.disabled = false;
+  }
+});
 
 function outputFields(output = {}) {
   const fieldset = document.createElement('fieldset');
@@ -661,6 +775,7 @@ $('#import-form').addEventListener('submit',async event => {
   finally { submit.disabled = false; }
 });
 function selectOutput(name, path) {
+  if (state.armedPlayback && (state.armedPlayback.name !== name || state.armedPlayback.path !== path)) disarmPlayback();
   state.selectedOutputs.set(name,path);
   const card = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === name);
   if (!card) return;
@@ -691,6 +806,7 @@ $('#instances').addEventListener('pointerout', event => {
 });
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 function switchTab(tab) {
+  disarmPlayback();
   for (const candidate of tabs) {
     const active = candidate === tab;
     candidate.setAttribute('aria-selected',String(active));
@@ -707,6 +823,7 @@ for (const tab of tabs) {
   });
 }
 for (const button of document.querySelectorAll('[data-buffer-view]')) button.addEventListener('click', () => {
+  disarmPlayback();
   state.bufferView = button.dataset.bufferView;
   for (const candidate of document.querySelectorAll('[data-buffer-view]')) candidate.setAttribute('aria-pressed',String(candidate === button));
   render();
@@ -725,7 +842,12 @@ function updateClock() {
   const now = new Date();
   $('#utc-clock').dateTime = now.toISOString();
   $('#utc-clock').textContent = `${now.toISOString().slice(11,19)} UTC`;
+  syncPlaybackGuards();
 }
+document.addEventListener('keydown', event => { if (event.key === 'Escape') disarmPlayback(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) disarmPlayback(); });
+window.addEventListener('blur', disarmPlayback);
+document.addEventListener('click', event => { if (!event.target.closest('.playback-guard')) disarmPlayback(); });
 updateClock();
 setInterval(updateClock,1000);
 

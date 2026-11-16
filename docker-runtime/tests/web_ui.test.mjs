@@ -167,6 +167,61 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.deepEqual(request.body,{action:'jump',jumptopos:oldest});
     assert.equal(request.headers['x-delayer-control'],'1');
   });
+  await t.test('date fields keep yyyy-mm-dd across locales and reject invalid calendar dates',async () => {
+    for (const [locale, timezoneId] of [['sv-SE','Europe/Stockholm'],['en-US','America/New_York']]) {
+      const context = await browser.newContext({locale,timezoneId,viewport:{width:1440,height:1100}});
+      try {
+        const localPage = await context.newPage();
+        localPage.on('pageerror',e => errors.push(e.message));
+        await localPage.clock.setFixedTime(new Date(newest));
+        const commands = [];
+        await localPage.route('**/api/**',async route => {
+          const path = new URL(route.request().url()).pathname;
+          let result = {authenticated:true,username:'admin'};
+          if (path === '/api/status') result = fixture();
+          else if (path.endsWith('/commands')) {commands.push(route.request().postDataJSON());result={command_id:42};}
+          await route.fulfill({json:result});
+        });
+        await localPage.goto(base);
+        await localPage.locator('.timeline-marker[data-path="2"]').click();
+        const form = localPage.locator('#command-form');
+        const submit = form.locator('button[type="submit"]');
+        const keys = ['jumptopos','startplayat','playto'];
+        for (const key of keys) {
+          const date = form.locator(`[name="${key}_date"]`);
+          assert.equal(await date.getAttribute('type'),'text');
+          assert.equal(await date.getAttribute('placeholder'),'yyyy-mm-dd');
+        }
+        assert.equal(await form.locator('[name="jumptopos_date"]').inputValue(),'2026-11-12');
+        await localPage.locator('#command-dialog').screenshot({path:join(screenshots,`delayer-fixed-dates-${locale}.png`)});
+        for (const [key, invalid] of [['jumptopos','2026-02-30'],['startplayat','2026-13-01'],['playto','2026-04-31'],['jumptopos','16/11/2026'],['jumptopos','2026-2-01']]) {
+          const date = form.locator(`[name="${key}_date"]`);
+          await date.fill(invalid);
+          assert.equal(await date.evaluate(el => el.validity.valid),false,`${invalid} in ${locale}`);
+          assert.equal(await date.getAttribute('aria-invalid'),'true');
+          assert.equal(await localPage.locator('#date-format-error').isVisible(),true);
+          assert.equal(await submit.isDisabled(),true);
+          await form.evaluate(el => el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+          assert.equal(commands.length,0,'invalid dates never reach the API');
+          await date.fill(key === 'jumptopos' ? '2026-11-12' : '');
+        }
+        const recorded = form.locator('[name="jumptopos_date"]');
+        await recorded.fill('2024-02-29');
+        assert.equal(await recorded.evaluate(el => el.validity.valid),true,'a leap day is a valid date');
+        await recorded.fill('2026-02-29');
+        assert.equal(await recorded.evaluate(el => el.validity.valid),false,'a leap day in a non-leap year is invalid');
+        await recorded.fill('2026-11-12');
+        assert.equal(await localPage.locator('#date-format-error').isVisible(),false);
+        await form.locator('[name="startplayat_date"]').fill('2026-11-13');
+        await form.locator('[name="startplayat_time"]').fill('01:30:00');
+        await form.locator('[name="playto_date"]').fill('2026-11-13');
+        await form.locator('[name="playto_time"]').fill('02:30:00');
+        await submit.click();
+        await localPage.locator('#command-dialog').waitFor({state:'hidden'});
+        assert.deepEqual(commands,[{action:'jump',jumptopos:'2026-11-12T02:40:00.000Z',startplayat:'2026-11-13T01:30:00.000Z',playto:'2026-11-13T02:30:00.000Z'}]);
+      } finally {await context.close();}
+    }
+  });
   await t.test('recorded time explains the buffer and expired schedules cannot be submitted',async () => {
     const dialog = page.locator('#command-dialog');
     const error = page.locator('#schedule-error');

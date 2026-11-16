@@ -51,6 +51,16 @@ function setUtcInput(form, key, value) {
   form.elements[`${key}_date`].value = utc.slice(0, 10);
   form.elements[`${key}_time`].value = utc.slice(11, 19);
 }
+function isUtcDate(value) {
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+function utcInputTimestamp(form, key) {
+  const date = form.elements[`${key}_date`].value;
+  const time = form.elements[`${key}_time`].value;
+  return isUtcDate(date) && time ? Date.parse(`${date}T${time}Z`) : NaN;
+}
 function readUtcInput(form, key, label) {
   const date = form.elements[`${key}_date`].value;
   const time = form.elements[`${key}_time`].value;
@@ -59,19 +69,29 @@ function readUtcInput(form, key, label) {
     form.elements[`${key}_${date ? 'time' : 'date'}`].focus();
     throw new Error(`${label}: enter both a date and a time in UTC, or leave both blank.`);
   }
+  if (!isUtcDate(date)) {
+    form.elements[`${key}_date`].focus();
+    throw new Error(`${label}: enter a valid date in yyyy-mm-dd format.`);
+  }
   // Date and time fields supply wall-clock values; interpret them together in UTC.
-  return new Date(`${date}T${time}Z`).toISOString();
+  return new Date(utcInputTimestamp(form, key)).toISOString();
 }
 
 function updateScheduleValidation() {
   const error = $('#schedule-error');
   const form = $('#command-form');
   const instance = state.instances.find(i => i.name === state.target?.name);
-  const [recordedMs, playbackMs, stopMs] = ['jumptopos', 'startplayat', 'playto'].map(key => {
-    const date = form.elements[`${key}_date`].value;
-    const time = form.elements[`${key}_time`].value;
-    return date && time ? Date.parse(`${date}T${time}Z`) : NaN;
+  const keys = ['jumptopos', 'startplayat', 'playto'];
+  const invalidDates = keys.map(key => {
+    const input = form.elements[`${key}_date`];
+    const active = state.target?.action === 'jump' || key === 'playto';
+    const invalid = Boolean(active && input.value && !isUtcDate(input.value));
+    input.setCustomValidity(invalid ? 'Enter a valid date in yyyy-mm-dd format.' : '');
+    input.setAttribute('aria-invalid', String(invalid));
+    return invalid;
   });
+  $('#date-format-error').hidden = !invalidDates.some(Boolean);
+  const [recordedMs, playbackMs, stopMs] = keys.map(key => utcInputTimestamp(form, key));
   const expiresMs = state.target?.action === 'jump'
     ? scheduledBufferExpiry(recordedMs, playbackMs, instance?.msbuffer) : null;
   const bufferHours = instance?.msbuffer / 3600_000;
@@ -83,7 +103,8 @@ function updateScheduleValidation() {
   error.hidden = !message;
   form.elements.startplayat_time.setCustomValidity(message);
   for (const key of ['startplayat_date', 'startplayat_time']) {
-    form.elements[key].setAttribute('aria-invalid', String(Boolean(message)));
+    const invalidDate = key === 'startplayat_date' && invalidDates[1];
+    form.elements[key].setAttribute('aria-invalid', String(Boolean(message || invalidDate)));
   }
   const stopMessage = state.target?.action === 'jump' && Number.isFinite(playbackMs)
     && Number.isFinite(stopMs) && stopMs <= playbackMs
@@ -93,10 +114,12 @@ function updateScheduleValidation() {
   stopError.hidden = !stopMessage;
   form.elements.playto_time.setCustomValidity(stopMessage);
   for (const key of ['playto_date', 'playto_time']) {
-    form.elements[key].setAttribute('aria-invalid', String(Boolean(stopMessage)));
+    const invalidDate = key === 'playto_date' && invalidDates[2];
+    form.elements[key].setAttribute('aria-invalid', String(Boolean(stopMessage || invalidDate)));
   }
-  $('button[type=submit]', form).disabled = commandSubmitting || Boolean(message || stopMessage);
-  return !message && !stopMessage;
+  const valid = !message && !stopMessage && !invalidDates.some(Boolean);
+  $('button[type=submit]', form).disabled = commandSubmitting || !valid;
+  return valid;
 }
 
 async function api(path, body) {
@@ -533,8 +556,6 @@ $('#instances').addEventListener('click', async event => {
     $('#schedule-field').hidden = action !== 'jump';
     form.elements.jumptopos_date.required = action === 'jump';
     form.elements.jumptopos_time.required = action === 'jump';
-    form.elements.jumptopos_date.min = output.status.startpos?.slice(0, 10) || '';
-    form.elements.jumptopos_date.max = output.status.lastpos?.slice(0, 10) || '';
     const position = playback(state.instances.find(i => i.name === name),output);
     // Date/time fields use whole seconds. Round the lower bound upward so
     // subsecond timestamps cannot prefill a position that is already expired.

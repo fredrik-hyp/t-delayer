@@ -230,6 +230,9 @@ Hoppdialogen validerar först att **Recorded time** finns inom den aktuella
 bufferten och visar fel direkt vid det fältet. Därefter kontrolleras starttid,
 buffertens livslängd och stopptid. Buffertintervallet uppdateras medan dialogen
 är öppen.
+Befintlig start- och stopptid för vald output fylls i när **Jump / schedule**
+öppnas igen. Om en tid har passerat visas ett valideringsfel så att tiden kan
+ändras eller rensas.
 
 Skrivningar returnerar `202 accepted` med kommando-ID efter att raden har
 committats i `delayercoms`. Det betyder köat, inte garanterat verkställt; följ

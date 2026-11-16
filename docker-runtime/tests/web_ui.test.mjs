@@ -474,6 +474,63 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.equal(await page.locator('[name="playto_time"]').getAttribute('aria-invalid'),'false');
     await page.keyboard.press('Escape');
   });
+  await t.test('reopening Jump / schedule preserves existing output times and submitted schedules',async () => {
+    const row=page.locator('[data-instance="st1"] [data-output="2"]');
+    const form=page.locator('#command-form');
+    const dialog=page.locator('#command-dialog');
+    const target=data.instances[0].outputs[2];
+    const commands=()=>requests.filter(r=>r.path.endsWith('/commands'));
+    const before=commands().length;
+    const values=()=>Promise.all(['startplayat_date','startplayat_time','playto_date','playto_time'].map(name=>form.locator(`[name="${name}"]`).inputValue()));
+    const setSchedule=async(start,stop)=>{
+      target.status.startplayat=start;target.status.playto=stop;
+      const stamp=value=>value ? new Date(value).toISOString().slice(0,19).replace('T',' ')+' UTC' : '—';
+      await page.waitForFunction(([start,stop])=>{
+        const row=document.querySelector('[data-instance="st1"] [data-output="2"]');
+        return row.querySelector('.output-start-time').textContent===`Start ${start}`
+          && row.querySelector('.output-stop-time').textContent===`Stop ${stop}`;
+      },[stamp(start),stamp(stop)]);
+    };
+    try {
+      await setSchedule('2026-11-12T14:00:00Z','2026-11-13T01:00:00Z');
+      for(let attempt=0;attempt<2;attempt++) {
+        await row.locator('[data-action="jump"]').click();
+        assert.deepEqual(await values(),['2026-11-12','14:00:00','2026-11-13','01:00:00']);
+        await page.keyboard.press('Escape');
+      }
+      await row.locator('[data-action="jump"]').click();
+      await form.locator('[name="startplayat_time"]').fill('15:00:00');
+      await page.waitForTimeout(2200);
+      assert.deepEqual(await values(),['2026-11-12','15:00:00','2026-11-13','01:00:00'],'polling preserves edits to an existing schedule');
+      assert.equal(commands().length,before,'opening and editing never sends a command');
+      await form.locator('button[type="submit"]').click();
+      await dialog.waitFor({state:'hidden'});
+      assert.deepEqual(commands().at(-1).body,{
+        action:'jump',jumptopos:'2026-11-12T02:40:00.000Z',startplayat:'2026-11-12T15:00:00.000Z',playto:'2026-11-13T01:00:00.000Z',
+      },'editing the start preserves the existing stop in the submitted command');
+      await page.locator('[data-instance="st1"] [data-output="1"] [data-action="jump"]').click();
+      assert.deepEqual(await values(),['','','',''],'times from another output never carry over');
+      await page.keyboard.press('Escape');
+      for(const [start,stop,expected] of [
+        ['2026-11-12T14:00:00Z',null,['2026-11-12','14:00:00','','']],
+        [null,'2026-11-13T01:00:00Z',['','','2026-11-13','01:00:00']],
+        ['2026-11-12T11:59:00Z','2026-11-12T11:59:59Z',['2026-11-12','11:59:00','2026-11-12','11:59:59']],
+      ]) {
+        await setSchedule(start,stop);
+        await row.locator('[data-action="jump"]').click();
+        assert.deepEqual(await values(),expected);
+        if(start==='2026-11-12T11:59:00Z') {
+          assert.equal(await page.locator('#schedule-error').isVisible(),true);
+          assert.equal(await page.locator('#stop-time-error').isVisible(),true);
+          assert.equal(await form.locator('button[type="submit"]').isDisabled(),true);
+        }
+        await page.keyboard.press('Escape');
+      }
+    } finally {
+      if(await dialog.isVisible()) await page.keyboard.press('Escape');
+      await setSchedule(null,null);
+    }
+  });
   await t.test('wall-clock fields require future times and revalidate as time passes',async () => {
     const dialog = page.locator('#command-dialog');
     const form = page.locator('#command-form');

@@ -650,7 +650,9 @@ $('#instances').addEventListener('click', async event => {
     const earliest = Math.floor(Date.parse(start) / 1000) * 1000 + (fractionalStart ? 1000 : 0);
     const current = position.state === 'expired' ? earliest : Math.max(earliest, Date.parse(output.status.currpos) || earliest);
     setUtcInput(form, 'jumptopos', action === 'jump' ? current : null);
-    setUtcInput(form, 'playto', Date.parse(output.status.playto) > Date.now() ? output.status.playto : null);
+    setUtcInput(form, 'startplayat', action === 'jump' ? output.status.startplayat : null);
+    const stop = action === 'jump' || Date.parse(output.status.playto) > Date.now() ? output.status.playto : null;
+    setUtcInput(form, 'playto', stop);
     $('#form-error').textContent = '';
     updateScheduleValidation();
     updateClock();

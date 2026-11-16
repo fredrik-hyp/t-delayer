@@ -1,4 +1,4 @@
-import {classifyPlayback, formatDelay, buildMarkerLayout, scheduledBufferExpiry} from './buffer-model.js';
+import {classifyPlayback, formatDelay, buildMarkerLayout, scheduledBufferExpiry, formatCountdown} from './buffer-model.js';
 
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -56,10 +56,13 @@ function isUtcDate(value) {
   const timestamp = Date.parse(`${value}T00:00:00Z`);
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
 }
+function isUtcTime(value) {
+  return /^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/.test(value);
+}
 function utcInputTimestamp(form, key) {
   const date = form.elements[`${key}_date`].value;
   const time = form.elements[`${key}_time`].value;
-  return isUtcDate(date) && time ? Date.parse(`${date}T${time}Z`) : NaN;
+  return isUtcDate(date) && isUtcTime(time) ? Date.parse(`${date}T${time}Z`) : NaN;
 }
 function readUtcInput(form, key, label) {
   const date = form.elements[`${key}_date`].value;
@@ -73,6 +76,10 @@ function readUtcInput(form, key, label) {
     form.elements[`${key}_date`].focus();
     throw new Error(`${label}: enter a valid date in yyyy-mm-dd format.`);
   }
+  if (!isUtcTime(time)) {
+    form.elements[`${key}_time`].focus();
+    throw new Error(`${label}: enter a valid 24-hour UTC time as hh:mm or hh:mm:ss.`);
+  }
   // Date and time fields supply wall-clock values; interpret them together in UTC.
   return new Date(utcInputTimestamp(form, key)).toISOString();
 }
@@ -81,6 +88,12 @@ function updateScheduleValidation() {
   const error = $('#schedule-error');
   const form = $('#command-form');
   const instance = state.instances.find(i => i.name === state.target?.name);
+  const isJump = state.target?.action === 'jump';
+  const output = instance?.outputs.find(o => o.pathnumber === state.target?.path);
+  const oldestMs = Date.parse(output?.status.startpos);
+  const newestMs = Date.parse(output?.status.lastpos);
+  const availableBuffer = state.connected && instance?.pid != null && output?.ready && !output.stale
+    && Number.isFinite(oldestMs) && Number.isFinite(newestMs) && oldestMs <= newestMs;
   const keys = ['jumptopos', 'startplayat', 'playto'];
   const invalidDates = keys.map(key => {
     const input = form.elements[`${key}_date`];
@@ -90,34 +103,72 @@ function updateScheduleValidation() {
     input.setAttribute('aria-invalid', String(invalid));
     return invalid;
   });
-  $('#date-format-error').hidden = !invalidDates.some(Boolean);
+  const timeFormatMessage = 'Enter a valid 24-hour UTC time as hh:mm or hh:mm:ss.';
+  const invalidTimes = keys.map(key => {
+    const input = form.elements[`${key}_time`];
+    const active = state.target?.action === 'jump' || key === 'playto';
+    const invalid = Boolean(active && input.value && !isUtcTime(input.value));
+    input.setCustomValidity(invalid ? timeFormatMessage : '');
+    input.setAttribute('aria-invalid', String(invalid));
+    return invalid;
+  });
   const [recordedMs, playbackMs, stopMs] = keys.map(key => utcInputTimestamp(form, key));
-  const expiresMs = state.target?.action === 'jump'
-    ? scheduledBufferExpiry(recordedMs, playbackMs, instance?.msbuffer) : null;
+  let recordedMessage = '';
+  if (isJump) {
+    if (invalidDates[0]) recordedMessage = 'Recorded time: enter a valid date in yyyy-mm-dd format.';
+    else if (invalidTimes[0]) recordedMessage = 'Recorded time: enter a valid 24-hour UTC time as hh:mm or hh:mm:ss.';
+    else if (!Number.isFinite(recordedMs)) recordedMessage = 'Recorded time: enter both a date and a time in UTC.';
+    else if (!availableBuffer) recordedMessage = 'The current buffer is unavailable. Wait for fresh status before choosing a recorded time.';
+    else if (recordedMs < oldestMs || recordedMs > newestMs) {
+      recordedMessage = `Recorded time must be within the current buffer: ${timeText(oldestMs)} – ${timeText(newestMs)}. Choose a recorded time in this range.`;
+    }
+    const help = availableBuffer
+      ? `Currently in buffer: ${timeText(oldestMs)} – ${timeText(newestMs)}. Older recordings are removed as the buffer moves forward.`
+      : 'Current buffer unavailable. Waiting for fresh status.';
+    if ($('#command-help').textContent !== help) $('#command-help').textContent = help;
+  }
+  const recordedError = $('#recorded-time-error');
+  if (recordedError.textContent !== recordedMessage) recordedError.textContent = recordedMessage;
+  recordedError.hidden = !recordedMessage;
+  form.elements.jumptopos_time.setCustomValidity(recordedMessage);
+  for (const key of ['jumptopos_date', 'jumptopos_time']) {
+    form.elements[key].setAttribute('aria-invalid', String(Boolean(recordedMessage)));
+  }
+  // Later scheduling checks require a valid position in the current buffer.
+  const canValidateSchedule = !recordedMessage;
+  $('#date-format-error').hidden = !canValidateSchedule || !invalidDates.slice(1).some(Boolean);
+  $('#time-format-error').hidden = !canValidateSchedule || !invalidTimes.slice(1).some(Boolean);
+  const nowMs = Date.now();
+  const pastStart = canValidateSchedule && isJump && Number.isFinite(playbackMs) && playbackMs <= nowMs;
+  const expiresMs = canValidateSchedule && isJump
+    ? scheduledBufferExpiry(recordedMs, playbackMs, instance?.msbuffer, nowMs) : null;
   const bufferHours = instance?.msbuffer / 3600_000;
   const bufferLabel = bufferHours < 1
     ? `${Number((bufferHours * 60).toFixed(2))}-minute buffer`
     : `${Number(bufferHours.toFixed(2))}-hour buffer`;
-  const message = expiresMs === null ? '' : `Cannot schedule playback: the recorded time expires from the buffer around ${timeText(expiresMs)} with the current ${bufferLabel}. Playback must start before this time. Choose an earlier playback start or a later recorded time.`;
+  const message = pastStart ? 'Start playback at must be in the future (UTC). Choose a later date and time.'
+    : expiresMs === null ? '' : `Cannot schedule playback: the recorded time expires from the buffer around ${timeText(expiresMs)} with the current ${bufferLabel}. Playback must start before this time. Choose an earlier playback start or a later recorded time.`;
   if (error.textContent !== message) error.textContent = message;
   error.hidden = !message;
-  form.elements.startplayat_time.setCustomValidity(message);
+  form.elements.startplayat_time.setCustomValidity(canValidateSchedule ? message || (invalidTimes[1] ? timeFormatMessage : '') : '');
   for (const key of ['startplayat_date', 'startplayat_time']) {
-    const invalidDate = key === 'startplayat_date' && invalidDates[1];
-    form.elements[key].setAttribute('aria-invalid', String(Boolean(message || invalidDate)));
+    const invalidFormat = key === 'startplayat_date' ? invalidDates[1] : invalidTimes[1];
+    form.elements[key].setAttribute('aria-invalid', String(canValidateSchedule && Boolean(message || invalidFormat)));
   }
-  const stopMessage = state.target?.action === 'jump' && Number.isFinite(playbackMs)
+  const stopMessage = !canValidateSchedule ? '' : Number.isFinite(stopMs) && stopMs <= nowMs
+    ? 'Stop at wall-clock time must be in the future (UTC). Choose a later date and time.'
+    : state.target?.action === 'jump' && Number.isFinite(playbackMs)
     && Number.isFinite(stopMs) && stopMs <= playbackMs
     ? `Cannot set stop time: it must be after Start playback at (${timeText(playbackMs)}). Choose a later stop time or an earlier playback start.` : '';
   const stopError = $('#stop-time-error');
   if (stopError.textContent !== stopMessage) stopError.textContent = stopMessage;
   stopError.hidden = !stopMessage;
-  form.elements.playto_time.setCustomValidity(stopMessage);
+  form.elements.playto_time.setCustomValidity(canValidateSchedule ? stopMessage || (invalidTimes[2] ? timeFormatMessage : '') : '');
   for (const key of ['playto_date', 'playto_time']) {
-    const invalidDate = key === 'playto_date' && invalidDates[2];
-    form.elements[key].setAttribute('aria-invalid', String(Boolean(stopMessage || invalidDate)));
+    const invalidFormat = key === 'playto_date' ? invalidDates[2] : invalidTimes[2];
+    form.elements[key].setAttribute('aria-invalid', String(canValidateSchedule && Boolean(stopMessage || invalidFormat)));
   }
-  const valid = !message && !stopMessage && !invalidDates.some(Boolean);
+  const valid = !recordedMessage && !message && !stopMessage && !invalidDates.some(Boolean) && !invalidTimes.some(Boolean);
   $('button[type=submit]', form).disabled = commandSubmitting || !valid;
   return valid;
 }
@@ -386,13 +437,46 @@ function outputRow(instance, output) {
   const position = playback(instance, output);
   const enabled = outputEnabled(instance, output);
   const armed = playbackArmed(instance, output);
+  const fresh = state.connected && instance.pid != null && output.ready && !output.stale;
+  const waitingForStart = fresh && stat.state === 'Pause' && Date.parse(stat.startplayat) > Date.now();
+  const stopState = !Number.isFinite(Date.parse(stat.playto)) ? 'unset'
+    : fresh && ['Live','Play'].includes(stat.state) ? 'active' : 'set';
+  const startTitle = waitingForStart ? 'Waiting for scheduled playback start' : '';
+  const stopTitle = stopState === 'active' ? 'Playback active; waiting for scheduled stop'
+    : stopState === 'set' ? 'Scheduled stop time' : '';
   const button = (action, text, unavailable = false) => `<button type="button" class="output-command" data-action="${action}" data-path="${output.pathnumber}" ${enabled && !unavailable && (!['play','pause'].includes(action) || armed) ? '' : 'disabled'}>${text}</button>`;
   const guard = `<div class="playback-guard" data-path="${output.pathnumber}" data-armed="${armed}" role="group" aria-label="Play and Pause safety guard"><button type="button" class="playback-arm output-command" data-action="arm" data-path="${output.pathnumber}" aria-pressed="${armed}" aria-describedby="playback-guard-help" ${enabled ? '' : 'disabled'}><svg class="guard-lock" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path class="guard-shackle" d="M6 9V6a4 4 0 0 1 8 0v3"/><rect x="4" y="9" width="12" height="9" rx="2"/><path d="M10 12v3"/></svg><span class="arm-label" aria-hidden="true">Arm</span><span class="guard-chevron" aria-hidden="true">⌃</span></button><div class="guarded-buttons">${button('play','Play',position.state === 'expired')}${button('pause','Pause')}</div></div>`;
   return `<article class="output-row" data-output="${output.pathnumber}" data-selected="${state.selectedOutputs.get(instance.name) === output.pathnumber}">
     <div class="output-name"><strong>${escapeHTML(output.name)}</strong><span>#${output.pathnumber} · ${escapeHTML(output.host)}:${output.port} · TTL ${output.ttl} · ${output.rawudp ? 'Raw UDP' : 'RTP preserved'}</span><span>${bps(metric.bitrateout)} out · ${bps(metric.bitratein)} in · UDP-drops ${escapeHTML(metric.udpdrops ?? '—')}</span></div>
     <span class="output-state" data-state="${position.state === 'live' && stat.state === 'Pause' ? 'available' : position.state}">${position.label}</span>
-    <div class="output-position"><strong>${timeText(stat.currpos)}</strong><span>${position.delayMs == null ? 'Last reported position' : `${duration(position.delayMs / 1000)} behind buffer end`}</span>${position.state === 'expired' ? '<span class="output-warning">Position overwritten · recovery required</span>' : ''}<span>Start ${timeText(stat.startplayat)} · Stop ${timeText(stat.playto)}</span></div>
+    <div class="output-position"><strong>${timeText(stat.currpos)}</strong><span>${position.delayMs == null ? 'Last reported position' : `${duration(position.delayMs / 1000)} behind buffer end`}</span>${position.state === 'expired' ? '<span class="output-warning">Position overwritten · recovery required</span>' : ''}<div class="output-schedule"><span class="output-start-time" data-schedule-state="${waitingForStart ? 'waiting' : 'idle'}" title="${startTitle}">Start ${timeText(stat.startplayat)}</span> · <span class="output-stop-time" data-schedule-state="${stopState}" title="${stopTitle}">Stop ${timeText(stat.playto)}</span></div><div class="output-countdown" role="timer" aria-live="off" hidden></div></div>
     <div class="row-actions">${guard}${button('jump',position.state === 'expired' ? 'Recover / schedule' : 'Jump / schedule')}${button('playto','Play until')}</div></article>`;
+}
+function syncOutputCountdowns() {
+  const nowMs = Date.now();
+  for (const row of document.querySelectorAll('.output-row')) {
+    const instance = state.instances.find(i => i.name === row.closest('[data-instance]').dataset.instance);
+    const output = instance?.outputs.find(o => o.pathnumber === Number(row.dataset.output));
+    const countdown = $('.output-countdown', row);
+    const fresh = state.connected && instance?.pid != null && output?.ready && !output.stale;
+    const stat = output?.status;
+    const playing = fresh && ['Live','Play'].includes(stat.state);
+    const phase = playing && Number.isFinite(Date.parse(stat.playto)) ? 'stop'
+      : fresh && stat.state === 'Pause' && Number.isFinite(Date.parse(stat.startplayat)) ? 'start' : null;
+    if (!phase) {
+      countdown.hidden = true;
+      countdown.textContent = '';
+      countdown.removeAttribute('data-phase');
+      countdown.removeAttribute('aria-label');
+      continue;
+    }
+    const deadlineMs = Date.parse(phase === 'start' ? stat.startplayat : stat.playto);
+    const text = `${phase === 'start' ? 'Starts in' : 'Stops in'} ${formatCountdown(deadlineMs - nowMs)}`;
+    if (countdown.textContent !== text) countdown.textContent = text;
+    countdown.dataset.phase = phase;
+    countdown.setAttribute('aria-label', phase === 'start' ? 'Time until playback starts' : 'Time until playback stops');
+    countdown.hidden = false;
+  }
 }
 function renderActivity() {
   const entries = [...state.activity, ...state.instances.flatMap(instance => instance.logs.map(log => ({timestamp: log.timestamp, title: instance.name, message: log.text})))].sort((a,b) => Date.parse(b.timestamp)-Date.parse(a.timestamp)).slice(0,100);
@@ -442,6 +526,7 @@ function render() {
   }
   renderActivity();
   syncPlaybackGuards();
+  syncOutputCountdowns();
   if (focusKey) {
     const section = [...document.querySelectorAll('[data-instance]')].find(el => el.dataset.instance === focusKey[0]);
     const next = section && [...section.querySelectorAll('button')].find(el => el.dataset.action === focusKey[1] && el.dataset.path === focusKey[2] && el.className === focusKey[3]);
@@ -479,6 +564,7 @@ async function refresh() {
     for (const button of document.querySelectorAll('[data-global-action]')) button.disabled = button.dataset.globalAction !== 'password';
     render();
     document.querySelectorAll('.output-command,.config-command').forEach(button => button.disabled = true);
+    if ($('#command-dialog').open) updateScheduleValidation();
   }
 }
 async function send(name, path, body) {
@@ -564,9 +650,10 @@ $('#instances').addEventListener('click', async event => {
     const earliest = Math.floor(Date.parse(start) / 1000) * 1000 + (fractionalStart ? 1000 : 0);
     const current = position.state === 'expired' ? earliest : Math.max(earliest, Date.parse(output.status.currpos) || earliest);
     setUtcInput(form, 'jumptopos', action === 'jump' ? current : null);
-    setUtcInput(form, 'playto', output.status.playto);
+    setUtcInput(form, 'playto', Date.parse(output.status.playto) > Date.now() ? output.status.playto : null);
     $('#form-error').textContent = '';
     updateScheduleValidation();
+    updateClock();
     $('#command-dialog').showModal();
     return;
   }
@@ -863,6 +950,11 @@ function updateClock() {
   const now = new Date();
   $('#utc-clock').dateTime = now.toISOString();
   $('#utc-clock').textContent = `${now.toISOString().slice(11,19)} UTC`;
+  for (const clock of document.querySelectorAll('[data-utc-now]')) {
+    clock.dateTime = now.toISOString();
+    clock.textContent = timeText(now.getTime());
+  }
+  syncOutputCountdowns();
   syncPlaybackGuards();
 }
 document.addEventListener('keydown', event => { if (event.key === 'Escape') disarmPlayback(); });

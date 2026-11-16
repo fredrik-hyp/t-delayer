@@ -23,12 +23,18 @@ Screenshots go to the system temporary directory, or `UI_SCREENSHOT_DIR`.
 The browser suite serves the actual production HTML, CSS and JavaScript with
 nginx's Content Security Policy. All API calls use test responses; it never
 connects to a real delayer or database. It checks authentication, command and
-configuration forms, fixed yyyy-mm-dd dates across browser locales, UTC payloads,
-expired-position recovery, scheduled buffer
+configuration forms, fixed yyyy-mm-dd dates and hh:mm:ss placeholders across
+browser locales, 24-hour time validation, ticking UTC clocks beside both optional
+time fields (without changing entered values), UTC payloads,
+expired-position recovery, Recorded time validation before schedule checks
+(including changing buffer bounds and unavailable status), scheduled buffer
 expiry validation (including retention changes and blocked submissions), stop times
-after scheduled starts, both buffer views,
+after scheduled starts, future wall-clock times (including open forms as time
+passes), both buffer views,
 selection and focus across polling, responsive layouts from 320 to 1440 pixels,
-single-use Play/Pause arming, automatic disarming, and stop confirmation,
+single-use Play/Pause arming, automatic disarming, stop confirmation,
+steady yellow scheduled-start and green/red stop indicators (including reduced motion),
+start/stop countdowns that tick each second and hide when not applicable,
 stale/disconnected status, untrusted text, and session expiration.
 
 For real Linux builds, multicast playback, chunk analysis, authentication and

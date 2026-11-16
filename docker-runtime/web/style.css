@@ -284,6 +284,13 @@ main { width: min(1480px, calc(100% - clamp(20px, 3.5vw, 48px))); margin: 0 auto
 .output-name span { display: block; overflow: hidden; margin-top: 5px; color: var(--muted); font: 650 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .output-position strong { display: block; font-size: 11px; }
 .output-position span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+.output-schedule { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.output-position .output-schedule > span { display: inline; margin: 0; }
+.output-countdown { margin-top: 4px; color: var(--amber); font-size: 11px; font-weight: 750; font-variant-numeric: tabular-nums; line-height: 1.5; }
+.output-countdown[data-phase="stop"] { color: var(--red); }
+.output-position .output-start-time[data-schedule-state="waiting"] { color: var(--amber); }
+.output-position .output-stop-time[data-schedule-state="set"] { color: var(--green); }
+.output-position .output-stop-time[data-schedule-state="active"] { color: var(--red); }
 .output-warning { margin-top: 5px; color: #ff9fab !important; }
 .row-actions { display: grid; grid-template-columns: 130px minmax(0, 1fr); grid-template-rows: repeat(2, minmax(32px, 1fr)); grid-template-areas: "transport jump" "transport until"; align-items: stretch; gap: 5px 8px; width: min(100%, 276px); min-width: 0; justify-self: end; }
 .row-actions > [data-action="jump"] { grid-area: jump; }
@@ -591,6 +598,7 @@ legend { padding: 0 7px; color: #91b7d7; font-size: 12px; }
 .date-time-fields { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; }
 .date-time-fields label { margin-top: 0; }
 .utc-date-time small { display: block; margin-top: 10px; font-size: 11px; line-height: 1.5; }
+.utc-reference time { color: #a8cee8; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .schedule-error { margin: 12px 0 0; border: 1px solid #913e50; border-radius: 8px; padding: 12px; background: #29131b; color: #ffb7c0; font-size: 12px; line-height: 1.6; }
 .utc-date-time input[aria-invalid="true"] { border-color: #d8617a; }
 body.disconnected .output-command { pointer-events: none; opacity: .42; }

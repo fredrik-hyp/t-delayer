@@ -167,7 +167,7 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.deepEqual(request.body,{action:'jump',jumptopos:oldest});
     assert.equal(request.headers['x-delayer-control'],'1');
   });
-  await t.test('date fields keep yyyy-mm-dd across locales and reject invalid calendar dates',async () => {
+  await t.test('date and optional time fields use fixed formats across locales and validate input',async () => {
     for (const [locale, timezoneId] of [['sv-SE','Europe/Stockholm'],['en-US','America/New_York']]) {
       const context = await browser.newContext({locale,timezoneId,viewport:{width:1440,height:1100}});
       try {
@@ -192,19 +192,51 @@ test('production cockpit integrates design and existing API contracts',async t =
           assert.equal(await date.getAttribute('type'),'text');
           assert.equal(await date.getAttribute('placeholder'),'yyyy-mm-dd');
         }
+        for (const key of ['startplayat','playto']) {
+          const time = form.locator(`[name="${key}_time"]`);
+          assert.equal(await time.getAttribute('type'),'text');
+          assert.equal(await time.getAttribute('placeholder'),'hh:mm:ss');
+          await time.focus();
+          await time.blur();
+          assert.equal(await time.inputValue(),'','a focused empty field must not acquire an example time');
+        }
+        const clocks = localPage.locator('[data-utc-now]');
+        assert.equal(await clocks.count(),2);
+        assert.deepEqual(await clocks.allTextContents(),['2026-11-12 12:00:00 UTC','2026-11-12 12:00:00 UTC']);
         assert.equal(await form.locator('[name="jumptopos_date"]').inputValue(),'2026-11-12');
         await localPage.locator('#command-dialog').screenshot({path:join(screenshots,`delayer-fixed-dates-${locale}.png`)});
+        await localPage.setViewportSize({width:320,height:800});
+        assert.equal(await localPage.locator('#command-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),true,'field clocks fit the mobile dialog');
+        await localPage.setViewportSize({width:1440,height:1100});
         for (const [key, invalid] of [['jumptopos','2026-02-30'],['startplayat','2026-13-01'],['playto','2026-04-31'],['jumptopos','16/11/2026'],['jumptopos','2026-2-01']]) {
           const date = form.locator(`[name="${key}_date"]`);
           await date.fill(invalid);
           assert.equal(await date.evaluate(el => el.validity.valid),false,`${invalid} in ${locale}`);
           assert.equal(await date.getAttribute('aria-invalid'),'true');
-          assert.equal(await localPage.locator('#date-format-error').isVisible(),true);
+          assert.equal(await localPage.locator(key === 'jumptopos' ? '#recorded-time-error' : '#date-format-error').isVisible(),true);
           assert.equal(await submit.isDisabled(),true);
           await form.evaluate(el => el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
           assert.equal(commands.length,0,'invalid dates never reach the API');
           await date.fill(key === 'jumptopos' ? '2026-11-12' : '');
         }
+        for (const key of ['startplayat','playto']) {
+          const time = form.locator(`[name="${key}_time"]`);
+          for (const invalid of ['24:00:00','12:60:00','12:30:60','1:30:00','12.30.00']) {
+            await time.fill(invalid);
+            assert.equal(await time.evaluate(el => el.validity.valid),false,`${invalid} in ${locale}`);
+            assert.equal(await time.getAttribute('aria-invalid'),'true');
+            assert.equal(await localPage.locator('#time-format-error').isVisible(),true);
+            assert.equal(await submit.isDisabled(),true);
+            await form.evaluate(el => el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+            assert.equal(commands.length,0,'malformed times never reach the API');
+          }
+          for (const valid of ['00:00','23:59:59']) {
+            await time.fill(valid);
+            assert.equal(await time.evaluate(el => el.validity.valid),true);
+          }
+          await time.fill('');
+        }
+        assert.equal(await localPage.locator('#time-format-error').isVisible(),false);
         const recorded = form.locator('[name="jumptopos_date"]');
         await recorded.fill('2024-02-29');
         assert.equal(await recorded.evaluate(el => el.validity.valid),true,'a leap day is a valid date');
@@ -213,13 +245,92 @@ test('production cockpit integrates design and existing API contracts',async t =
         await recorded.fill('2026-11-12');
         assert.equal(await localPage.locator('#date-format-error').isVisible(),false);
         await form.locator('[name="startplayat_date"]').fill('2026-11-13');
-        await form.locator('[name="startplayat_time"]').fill('01:30:00');
+        await form.locator('[name="startplayat_time"]').fill('01:30');
         await form.locator('[name="playto_date"]').fill('2026-11-13');
         await form.locator('[name="playto_time"]').fill('02:30:00');
+        await localPage.clock.setFixedTime(new Date('2026-11-12T12:00:01Z'));
+        await localPage.waitForFunction(()=>[...document.querySelectorAll('[data-utc-now]')].every(clock=>clock.textContent==='2026-11-12 12:00:01 UTC'));
+        assert.equal(await form.locator('[name="startplayat_time"]').inputValue(),'01:30','ticking clocks do not change the scheduled start');
+        assert.equal(await form.locator('[name="playto_time"]').inputValue(),'02:30:00','ticking clocks do not change the scheduled stop');
+        assert.equal(commands.length,0);
         await submit.click();
         await localPage.locator('#command-dialog').waitFor({state:'hidden'});
         assert.deepEqual(commands,[{action:'jump',jumptopos:'2026-11-12T02:40:00.000Z',startplayat:'2026-11-13T01:30:00.000Z',playto:'2026-11-13T02:30:00.000Z'}]);
       } finally {await context.close();}
+    }
+  });
+  await t.test('recorded time errors take precedence over scheduling errors and follow live buffer bounds',async () => {
+    const dialog = page.locator('#command-dialog');
+    const form = page.locator('#command-form');
+    const recordedError = page.locator('#recorded-time-error');
+    const scheduleError = page.locator('#schedule-error');
+    const stopError = page.locator('#stop-time-error');
+    const submit = form.locator('button[type="submit"]');
+    const commands = () => requests.filter(r=>r.path.endsWith('/commands'));
+    const before=commands().length;
+    data=fixture();data.instances[0].msbuffer=30*60_000;
+    for (const output of data.instances[0].outputs) {
+      Object.assign(output.status,{startpos:'2026-11-16T13:40:21Z',lastpos:'2026-11-16T14:10:39Z',currpos:'2026-11-16T14:00:00Z'});
+    }
+    try {
+      await page.clock.setFixedTime(new Date('2026-11-16T14:11:51Z'));
+      await page.waitForFunction(()=>document.querySelector('[data-instance="st1"] [data-output="2"] .output-position strong').textContent==='2026-11-16 14:00:00 UTC');
+      await page.locator('.timeline-marker[data-path="2"]').click();
+      await form.locator('[name="jumptopos_time"]').fill('14:45:29');
+      await form.locator('[name="startplayat_date"]').fill('2026-11-26');
+      await form.locator('[name="startplayat_time"]').fill('14:15:35');
+      assert.equal(await recordedError.isVisible(),true);
+      assert.match(await recordedError.textContent(),/within the current buffer: 2026-11-16 13:40:21 UTC – 2026-11-16 14:10:39 UTC/);
+      assert.equal(await scheduleError.isVisible(),false,'do not calculate expiry for a nonexistent recording');
+      assert.equal(await form.locator('[name="jumptopos_date"]').getAttribute('aria-invalid'),'true');
+      assert.equal(await form.locator('[name="jumptopos_time"]').getAttribute('aria-invalid'),'true');
+      assert.equal(await form.locator('[name="startplayat_time"]').getAttribute('aria-invalid'),'false');
+      assert.equal(await submit.isDisabled(),true);
+      await form.evaluate(el=>el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+      assert.equal(commands().length,before);
+      await dialog.screenshot({path:join(screenshots,'delayer-recorded-time-priority-error.png')});
+      await form.locator('[name="playto_date"]').fill('2026-11-16');
+      await form.locator('[name="playto_time"]').fill('14:00:00');
+      assert.equal(await stopError.isVisible(),false,'later stop checks also wait for valid Recorded time');
+      await form.locator('[name="jumptopos_time"]').fill('13:30:00');
+      assert.equal(await recordedError.isVisible(),true,'times before the oldest packet are also invalid');
+      assert.equal(await scheduleError.isVisible(),false);
+      await form.locator('[name="jumptopos_time"]').fill('14:00:00');
+      assert.equal(await recordedError.isVisible(),false);
+      assert.match(await scheduleError.textContent(),/2026-11-16 14:30:00 UTC/,'expiry is evaluated after correcting Recorded time');
+      assert.equal(await stopError.isVisible(),true);
+      for (const key of ['startplayat','playto']) {
+        await form.locator(`[name="${key}_date"]`).fill('');
+        await form.locator(`[name="${key}_time"]`).fill('');
+      }
+      for (const boundary of ['13:40:21','14:10:39']) {
+        await form.locator('[name="jumptopos_time"]').fill(boundary);
+        assert.equal(await recordedError.isVisible(),false,'both exact buffer boundaries are valid');
+        assert.equal(await submit.isEnabled(),true);
+      }
+      await form.locator('[name="jumptopos_time"]').fill('13:40:21');
+      for (const output of data.instances[0].outputs) {
+        output.status.startpos='2026-11-16T13:40:22Z';
+        output.status.lastpos='2026-11-16T14:11:40Z';
+      }
+      await recordedError.waitFor({state:'visible'});
+      assert.match(await page.locator('#command-help').textContent(),/13:40:22 UTC – 2026-11-16 14:11:40 UTC/);
+      assert.equal(await form.locator('[name="jumptopos_time"]').inputValue(),'13:40:21','polling does not replace user input');
+      await form.locator('[name="jumptopos_time"]').fill('14:00:00');
+      assert.equal(await submit.isEnabled(),true);
+      await form.locator('[name="jumptopos_date"]').fill('');
+      assert.match(await recordedError.textContent(),/enter both a date and a time/);
+      assert.equal(await submit.isDisabled(),true);
+      await form.locator('[name="jumptopos_date"]').fill('2026-11-16');
+      offline=true;
+      await page.waitForFunction(()=>document.querySelector('#recorded-time-error').textContent.includes('buffer is unavailable'));
+      assert.equal(await submit.isDisabled(),true);
+      assert.equal(await scheduleError.isVisible(),false);
+    } finally {
+      offline=false;data=fixture();
+      await page.clock.setFixedTime(new Date(newest));
+      if (await dialog.isVisible()) await page.keyboard.press('Escape');
+      await page.waitForFunction(()=>document.querySelector('[data-instance="st1"] [data-output="2"] .output-position strong').textContent==='2026-11-12 02:40:00 UTC');
     }
   });
   await t.test('recorded time explains the buffer and expired schedules cannot be submitted',async () => {
@@ -362,6 +473,215 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.equal(await error.isVisible(),false,'stop-only dialog does not inherit the error');
     assert.equal(await page.locator('[name="playto_time"]').getAttribute('aria-invalid'),'false');
     await page.keyboard.press('Escape');
+  });
+  await t.test('wall-clock fields require future times and revalidate as time passes',async () => {
+    const dialog = page.locator('#command-dialog');
+    const form = page.locator('#command-form');
+    const submit = form.locator('button[type="submit"]');
+    const startError = page.locator('#schedule-error');
+    const stopError = page.locator('#stop-time-error');
+    const before = requests.filter(r => r.path.endsWith('/commands')).length;
+    await page.locator('.timeline-marker[data-path="2"]').click();
+    for (const key of ['startplayat','playto']) {
+      assert.equal(await form.locator(`[name="${key}_date"]`).inputValue(),'');
+      assert.equal(await form.locator(`[name="${key}_time"]`).inputValue(),'');
+    }
+    assert.match(await page.locator('#schedule-field legend').textContent(), /future time/);
+    assert.match(await page.locator('#end-field legend').textContent(), /future time/);
+    await form.locator('[name="startplayat_date"]').fill('2026-11-12');
+    for (const time of ['11:59:59','12:00:00']) {
+      await form.locator('[name="startplayat_time"]').fill(time);
+      assert.match(await startError.textContent(), /must be in the future \(UTC\)/);
+      assert.equal(await submit.isDisabled(),true);
+    }
+    await form.evaluate(el => el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+    assert.equal(requests.filter(r => r.path.endsWith('/commands')).length,before);
+    await form.locator('[name="startplayat_time"]').fill('12:00:05');
+    assert.equal(await startError.isVisible(),false);
+    await form.locator('[name="playto_date"]').fill('2026-11-11');
+    await form.locator('[name="playto_time"]').fill('23:59:59');
+    assert.match(await stopError.textContent(), /must be in the future \(UTC\)/);
+    await form.locator('[name="playto_date"]').fill('2026-11-12');
+    await form.locator('[name="playto_time"]').fill('12:00:00');
+    assert.equal(await submit.isDisabled(),true);
+    await form.locator('[name="playto_time"]').fill('12:00:10');
+    assert.equal(await stopError.isVisible(),false);
+    assert.equal(await submit.isEnabled(),true);
+    try {
+      await page.clock.setFixedTime(new Date('2026-11-12T12:00:05Z'));
+      await page.waitForFunction(() => document.querySelector('#schedule-error').textContent.includes('must be in the future'));
+      assert.equal(await submit.isDisabled(),true,'an open form cannot retain a start that has passed');
+      await page.clock.setFixedTime(new Date('2026-11-12T12:00:10Z'));
+      await page.waitForFunction(() => document.querySelector('#stop-time-error').textContent.includes('must be in the future'));
+    } finally {await page.clock.setFixedTime(new Date(newest));}
+    await page.keyboard.press('Escape');
+    data.instances[0].outputs[2].status.playto='2026-11-12T11:59:59Z';
+    await page.waitForTimeout(2200);
+    await page.locator('[data-output="2"] [data-action="playto"]').click();
+    assert.equal(await form.locator('[name="playto_date"]').inputValue(),'','expired stop times are not prefilled');
+    assert.equal(await form.locator('[name="playto_time"]').inputValue(),'');
+    await form.locator('[name="playto_date"]').fill('2026-11-12');
+    await form.locator('[name="playto_time"]').fill('11:59:59');
+    assert.match(await stopError.textContent(), /must be in the future/,'stop-only commands also require a future time');
+    assert.equal(await submit.isDisabled(),true);
+    await form.evaluate(el => el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+    assert.equal(requests.filter(r => r.path.endsWith('/commands')).length,before);
+    await form.locator('[name="playto_date"]').fill('');
+    await form.locator('[name="playto_time"]').fill('');
+    assert.equal(await stopError.isVisible(),false);
+    assert.equal(await submit.isEnabled(),true);
+    data.instances[0].outputs[2].status.playto=null;
+    await page.keyboard.press('Escape');
+  });
+  await t.test('countdowns tick from start to stop and disappear when not applicable',async () => {
+    const row=page.locator('[data-instance="st1"] [data-output="2"]');
+    const timer=row.locator('.output-countdown');
+    const target=data.instances[0].outputs[2];
+    const waitText=text=>page.waitForFunction(text=>{
+      const timer=document.querySelector('[data-instance="st1"] [data-output="2"] .output-countdown');
+      return !timer.hidden && timer.textContent===text;
+    },text);
+    try {
+      await timer.waitFor({state:'hidden'});
+      target.status.state='Pause';
+      target.status.playto='2026-11-12T12:00:30Z';
+      await page.waitForTimeout(2200);
+      assert.equal(await timer.isVisible(),false,'a paused output without a start has no countdown');
+      target.status.startplayat='2026-11-12T12:00:10Z';
+      await waitText('Starts in 00:00:10');
+      assert.equal(await timer.getAttribute('role'),'timer');
+      assert.equal(await timer.getAttribute('data-phase'),'start');
+      assert.equal(await timer.getAttribute('aria-live'),'off');
+      await row.screenshot({path:join(screenshots,'delayer-countdown-start.png')});
+      const jump=row.locator('[data-action="jump"]');
+      await jump.focus();
+      await page.clock.setFixedTime(new Date('2026-11-12T12:00:01Z'));
+      await waitText('Starts in 00:00:09');
+      assert.equal(await jump.evaluate(el=>el===document.activeElement),true,'a countdown tick preserves keyboard focus');
+      await page.clock.setFixedTime(new Date('2026-11-12T12:00:09.500Z'));
+      await waitText('Starts in 00:00:01');
+      await page.clock.setFixedTime(new Date('2026-11-12T12:00:10Z'));
+      await waitText('Starts in 00:00:00');
+      assert.equal(await timer.getAttribute('data-phase'),'start','the deadline alone does not imply playback has started');
+      target.status.state='Play';target.status.startplayat=null;
+      await waitText('Stops in 00:00:20');
+      assert.equal(await timer.getAttribute('data-phase'),'stop');
+      await row.screenshot({path:join(screenshots,'delayer-countdown-stop.png')});
+      await page.clock.setFixedTime(new Date('2026-11-12T12:00:11Z'));
+      await waitText('Stops in 00:00:19');
+      await page.locator('[data-buffer-view="ring"]').click();
+      assert.equal(await timer.textContent(),'Stops in 00:00:19');
+      await page.setViewportSize({width:320,height:800});
+      assert.equal(await row.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+      await row.screenshot({path:join(screenshots,'delayer-countdown-mobile.png')});
+      await page.setViewportSize({width:1440,height:1100});
+      target.status.playto=null;
+      await timer.waitFor({state:'hidden'});
+      assert.equal(await timer.textContent(),'');
+      assert.equal(await timer.evaluate(el=>getComputedStyle(el).display),'none','no empty countdown space remains');
+      target.status.state='Live';target.status.playto='2026-11-12T12:00:30Z';
+      await waitText('Stops in 00:00:19');
+      target.status.playto='2026-11-12T12:00:10Z';
+      await waitText('Stops in 00:00:00');
+      target.status.state='Pause';
+      await timer.waitFor({state:'hidden'});
+      target.status.startplayat='2026-11-12T12:01:00Z';
+      target.status.playto='2026-11-12T12:02:00Z';
+      await waitText('Starts in 00:00:49');
+      target.ready=false;target.stale=true;
+      await timer.waitFor({state:'hidden'});
+      target.ready=true;target.stale=false;
+      await waitText('Starts in 00:00:49');
+      offline=true;
+      await timer.waitFor({state:'hidden'});
+      offline=false;
+      await waitText('Starts in 00:00:49');
+      data.instances[0].pid=null;data.instances[0].process_state='stopped';
+      await timer.waitFor({state:'hidden'});
+    } finally {
+      data=fixture();offline=false;
+      await page.clock.setFixedTime(new Date(newest));
+      await page.setViewportSize({width:1440,height:1100});
+      await page.locator('[data-buffer-view="timeline"]').click();
+      await page.waitForFunction(()=>document.querySelector('[data-instance="st1"] [data-output="2"] .output-state').textContent==='Delayed');
+    }
+  });
+  await t.test('scheduled times keep steady colors according to fresh playback state',async () => {
+    const row = page.locator('[data-instance="st1"] [data-output="2"]');
+    const start = row.locator('.output-start-time');
+    const stop = row.locator('.output-stop-time');
+    const target = data.instances[0].outputs[2];
+    const waitStates = async (startState, stopState) => page.waitForFunction(([startState,stopState]) => {
+      const row=document.querySelector('[data-instance="st1"] [data-output="2"]');
+      return row.querySelector('.output-start-time').dataset.scheduleState===startState
+        && row.querySelector('.output-stop-time').dataset.scheduleState===stopState;
+    },[startState,stopState]);
+    const color = locator => locator.evaluate(el => getComputedStyle(el).color);
+    const animation = locator => locator.evaluate(el => getComputedStyle(el).animationName);
+    const checkSteady = async locator => {
+      assert.equal(await animation(locator),'none');
+      assert.equal(await locator.evaluate(el=>el.getAnimations().length),0);
+      assert.equal(await locator.evaluate(el=>getComputedStyle(el).opacity),'1');
+    };
+    try {
+      await page.emulateMedia({reducedMotion:'no-preference'});
+      target.status.state='Pause';
+      target.status.startplayat='2026-11-12T12:01:00Z';
+      target.status.playto='2026-11-12T12:02:00Z';
+      await waitStates('waiting','set');
+      assert.equal(await color(start),'rgb(243, 189, 91)');
+      assert.equal(await color(stop),'rgb(83, 211, 155)');
+      assert.equal(await animation(stop),'none');
+      assert.match(await start.getAttribute('title'),/Waiting for scheduled playback start/);
+      await checkSteady(start);
+      await checkSteady(stop);
+      await row.screenshot({path:join(screenshots,'delayer-scheduled-start-waiting.png')});
+      await page.emulateMedia({reducedMotion:'reduce'});
+      assert.equal(await animation(start),'none');
+      assert.equal(await color(start),'rgb(243, 189, 91)');
+      await page.emulateMedia({reducedMotion:'no-preference'});
+      await page.clock.setFixedTime(new Date('2026-11-12T12:01:01Z'));
+      await waitStates('idle','set');
+      assert.equal(await color(stop),'rgb(83, 211, 155)','passing the start deadline does not imply playback has started');
+      target.status.state='Play';
+      target.status.startplayat=null;
+      await waitStates('idle','active');
+      assert.equal(await color(stop),'rgb(239, 116, 116)');
+      assert.match(await stop.getAttribute('title'),/Playback active/);
+      await checkSteady(stop);
+      await row.screenshot({path:join(screenshots,'delayer-scheduled-stop-active.png')});
+      await page.emulateMedia({reducedMotion:'reduce'});
+      assert.equal(await animation(stop),'none');
+      assert.equal(await color(stop),'rgb(239, 116, 116)');
+      await page.emulateMedia({reducedMotion:'no-preference'});
+      target.status.state='Pause';
+      await waitStates('idle','set');
+      assert.equal(await color(stop),'rgb(83, 211, 155)');
+      target.status.state='Live';
+      await waitStates('idle','active');
+      target.ready=false;target.stale=true;
+      await waitStates('idle','set');
+      assert.equal(await animation(stop),'none','stale status does not report active playback');
+      target.ready=true;target.stale=false;
+      await waitStates('idle','active');
+      offline=true;
+      await waitStates('idle','set');
+      await checkSteady(stop);
+      offline=false;
+      await waitStates('idle','active');
+      data.instances[0].pid=null;
+      data.instances[0].process_state='stopped';
+      await waitStates('idle','set');
+      await checkSteady(stop);
+      target.status.playto=null;
+      await waitStates('idle','unset');
+      assert.equal(await animation(stop),'none');
+    } finally {
+      data=fixture();offline=false;
+      await page.clock.setFixedTime(new Date(newest));
+      await page.emulateMedia({reducedMotion:'no-preference'});
+      await page.waitForFunction(()=>document.querySelector('[data-instance="st1"] [data-output="2"] .output-state').textContent==='Delayed');
+    }
   });
   await t.test('Play and Pause require a temporary, single-use arm for the selected output',async () => {
     const row=page.locator('[data-instance="st1"] [data-output="2"]');

@@ -29,6 +29,10 @@ class ValidationTests(unittest.TestCase):
                                    'startplayat':(self.now+timedelta(seconds=20)).isoformat()+'Z',
                                    'playto':(self.now+timedelta(seconds=30)).isoformat()+'Z'}, self.stat, self.msbuffer)
         self.assertEqual(result['action'], 'jump')
+        with self.assertRaises(APIError) as invalid_recording:
+            validate_command({'action':'jump','jumptopos':(self.now+timedelta(seconds=10)).isoformat()+'Z',
+                              'startplayat':(self.now+timedelta(days=10)).isoformat()+'Z'}, self.stat, self.msbuffer)
+        self.assertIn('outside the available buffer',invalid_recording.exception.message)
         for stop_seconds in [10, 20]:
             with self.subTest(stop_seconds=stop_seconds), self.assertRaises(APIError) as error:
                 validate_command({'action':'jump', 'jumptopos':(self.now-timedelta(seconds=20)).isoformat()+'Z',
@@ -56,6 +60,17 @@ class ValidationTests(unittest.TestCase):
             self.assertIn('expires from the buffer', error.exception.message)
         with self.assertRaises(APIError):
             validate_command(dict(body, startplayat=(self.now+timedelta(minutes=10)).isoformat()+'Z'), self.stat, 5*60_000)
+
+    def test_wall_clock_start_and_stop_must_be_in_the_future(self):
+        recorded=(self.now-timedelta(seconds=20)).isoformat()+'Z'
+        for seconds in [-1, 0]:
+            value=(self.now+timedelta(seconds=seconds)).isoformat()+'Z'
+            for body in [dict(action='jump',jumptopos=recorded,startplayat=value),
+                         dict(action='playto',playto=value),
+                         dict(action='jump',jumptopos=recorded,playto=value)]:
+                with self.subTest(body=body), self.assertRaises(APIError) as error:
+                    validate_command(body, self.stat, self.msbuffer)
+                self.assertEqual(error.exception.status,400)
 
     def test_unknown_action_and_fields_are_rejected(self):
         for body in [{'action':'restart'}, {'action':'pause','pid':1}, {'action':'play','jumptopos':'2026-11-05T12:00:00Z'}]:

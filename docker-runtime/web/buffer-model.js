@@ -2,6 +2,15 @@ const DEFAULT_LIVE_TOLERANCE_MS = 2_000;
 const LABEL_HALF_WIDTH_PERCENT = 12;
 const LABEL_SPACING_PERCENT = 26;
 
+export function formatCountdown(remainingMs) {
+  if (!Number.isFinite(remainingMs)) return '—';
+  const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  const days = Math.floor(seconds / 86400);
+  const clock = [Math.floor(seconds / 3600) % 24, Math.floor(seconds / 60) % 60, seconds % 60]
+    .map(value => String(value).padStart(2, '0')).join(':');
+  return days ? `${days} d ${clock}` : clock;
+}
+
 // Retention is an age limit, not the duration currently recorded in the buffer.
 // Cleanup removes whole chunks, so this is a conservative expiry estimate.
 export function scheduledBufferExpiry(recordedMs, playbackMs, retentionMs, nowMs = Date.now()) {

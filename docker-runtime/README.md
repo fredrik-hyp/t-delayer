@@ -78,6 +78,14 @@ markeringen visar att skyddet är öppet. Skyddet stängs även vid ett misslyck
 kommando, Escape, byte av output eller vy, när fönstret lämnas och vid förlorad
 anslutning eller inaktuell status. Jump / schedule och Play until har kvar sina
 egna dialoger.
+En framtida starttid visas i gult medan outputen väntar på start. En angiven
+stopptid visas i grönt och blir röd när outputen rapporterar pågående
+uppspelning. Vid paus återgår stopptiden till grönt. Tiderna visas med fasta
+färger utan pulsering. Vid inaktuell status, förlorad anslutning och instansstopp
+visas ingen aktiv väntan eller uppspelning.
+En nedräknare vid tiderna visar **Starts in HH:MM:SS** före schemalagd start och
+**Stops in HH:MM:SS** under uppspelning med angiven stopptid. Den uppdateras varje
+sekund och döljs när ingen relevant tid finns eller statusen är inaktuell.
 Instansens gröna **Running**-märke växlar till rött **No input** när aktuell
 inputstatistik visar 0 bit/s. Märket och kortets vänsterrand blinkar rött i
 samma takt, en gång per sekund, och återgår
@@ -218,6 +226,10 @@ Detta är befintliga `jump`, `play`, `pause`, `playto`-semantiken. `playto` är 
 sluttid tar också bort tidigare sluttid. Alla tider i UI:t visas och anges i UTC,
 inklusive dialogernas separata datum- och klockslagsfält. API:t kräver ISO 8601 med tidszon. Databasen
 och C-processernas libpq-sessioner kör UTC.
+Hoppdialogen validerar först att **Recorded time** finns inom den aktuella
+bufferten och visar fel direkt vid det fältet. Därefter kontrolleras starttid,
+buffertens livslängd och stopptid. Buffertintervallet uppdateras medan dialogen
+är öppen.
 
 Skrivningar returnerar `202 accepted` med kommando-ID efter att raden har
 committats i `delayercoms`. Det betyder köat, inte garanterat verkställt; följ

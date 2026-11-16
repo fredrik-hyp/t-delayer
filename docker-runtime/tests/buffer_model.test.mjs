@@ -1,8 +1,21 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {classifyPlayback, buildMarkerLayout, formatDelay, scheduledBufferExpiry} from '../web/buffer-model.js';
+import {classifyPlayback, buildMarkerLayout, formatDelay, scheduledBufferExpiry, formatCountdown} from '../web/buffer-model.js';
 
 const bounds = {oldestMs: 10_000, newestMs: 110_000};
+test('countdowns keep full seconds, clamp elapsed deadlines and support days', () => {
+  assert.equal(formatCountdown(0),'00:00:00');
+  assert.equal(formatCountdown(-1000),'00:00:00');
+  assert.equal(formatCountdown(1),'00:00:01');
+  assert.equal(formatCountdown(999),'00:00:01');
+  assert.equal(formatCountdown(1001),'00:00:02');
+  assert.equal(formatCountdown(229_000),'00:03:49');
+  assert.equal(formatCountdown(3661_000),'01:01:01');
+  assert.equal(formatCountdown(25*3600_000),'1 d 01:00:00');
+  assert.equal(formatCountdown(NaN),'—');
+  assert.equal(formatCountdown(Infinity),'—');
+});
+
 test('scheduled playback is invalid at or after the recorded position expires', () => {
   const recorded = Date.parse('2026-11-16T09:30:00Z');
   const now = Date.parse('2026-11-16T09:55:00Z');

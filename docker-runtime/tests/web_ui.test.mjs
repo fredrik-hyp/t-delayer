@@ -258,14 +258,12 @@ test('production cockpit integrates design and existing API contracts',async t =
     await page.locator('#command-dialog').waitFor({state:'hidden'});
     assert.deepEqual(requests.findLast(r => r.path.endsWith('/outputs/2/commands')).body,{action:'playto'});
   });
-  await t.test('ring view, tabs, resources, activity drawer and compact mode',async () => {
+  await t.test('ring view, tabs, resources and activity drawer',async () => {
     await page.locator('[data-buffer-view="ring"]').click();
     assert.equal(await page.locator('.buffer-output').count(),3);
     await page.locator('.buffer-output[data-path="2"]').click();
     assert.equal(await page.locator('[data-output="2"]').getAttribute('data-selected'),'true');
     await page.screenshot({path:join(screenshots,'delayer-cockpit-ring.png'),fullPage:true});
-    await page.locator('#density-toggle').click();
-    assert.equal(await page.locator('body').getAttribute('class'),'compact');
     await page.locator('#tab-resources').click();
     assert.equal(await page.locator('#cpu-value').textContent(),'14.0%');
     await page.screenshot({path:join(screenshots,'delayer-resources.png'),fullPage:true});

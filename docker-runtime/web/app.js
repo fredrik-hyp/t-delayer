@@ -711,10 +711,6 @@ for (const button of document.querySelectorAll('[data-buffer-view]')) button.add
   for (const candidate of document.querySelectorAll('[data-buffer-view]')) candidate.setAttribute('aria-pressed',String(candidate === button));
   render();
 });
-$('#density-toggle').addEventListener('click',event => {
-  const compact = document.body.classList.toggle('compact');
-  event.currentTarget.setAttribute('aria-pressed',String(compact));
-});
 $('#notifications-button').addEventListener('click', () => {
   $('#notification-drawer').showModal();
   $('#notifications-button').setAttribute('aria-expanded','true');

@@ -61,8 +61,8 @@ Misslyckade lösenordsförsök begränsas per klientadress.
 
 Gränssnittet använder Polylegio Delayers Operations-layout med flikarna
 **Instances**, **Activity**, **Resources** och **Configuration**. Översiktskorten
-visar driftstatus, instanser, outputs, lagring och nätverk. **Compact** växlar
-täthet. **Activity** i sidhuvudet öppnar driftloggen i en sidopanel.
+visar driftstatus, instanser, outputs, lagring och nätverk. **Activity** i
+sidhuvudet öppnar driftloggen i en sidopanel.
 
 Under **Instances** växlar **Timeline** och **Ring buffer** mellan de två
 buffertvyerna. Båda använder serverns rapporterade inspelningsgränser och

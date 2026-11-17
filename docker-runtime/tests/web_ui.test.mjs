@@ -87,6 +87,16 @@ test('production cockpit integrates design and existing API contracts',async t =
     assert.equal(await page.locator('[data-instance="st2"] [data-action="start"]').isEnabled(),true);
     assert.equal(await page.locator('[data-instance="st1"] [data-output="0"] [data-action="play"]').isDisabled(),true);
     assert.equal(await page.locator('.timeline-marker').count(),2);
+    const expired=page.locator('[data-instance="st1"] [data-output="0"]');
+    for(const view of ['timeline','ring']) {
+      await page.locator(`[data-buffer-view="${view}"]`).click();
+      const buffer=page.locator('[data-instance="st1"] .buffer-section');
+      assert.doesNotMatch(await buffer.textContent(),/Position overwritten/,'no duplicate warning below the buffer');
+      assert.equal(await buffer.locator('.timeline-expired').count(),0);
+      assert.equal(await expired.locator('.output-warning').textContent(),'Position overwritten · recovery required');
+      assert.equal(await expired.getByRole('button',{name:'Recover / schedule',exact:true}).isEnabled(),true);
+    }
+    await page.locator('[data-buffer-view="timeline"]').click();
     await page.screenshot({path:join(screenshots,'delayer-cockpit-desktop.png'),fullPage:true});
   });
   await t.test('stop confirmation identifies the instance and defaults to keeping it running',async () => {
@@ -158,7 +168,7 @@ test('production cockpit integrates design and existing API contracts',async t =
     await page.screenshot({path:join(screenshots,'delayer-command-dialog.png'),fullPage:true});
     await page.locator('#command-dialog [data-close-command]').first().click();
     assert.equal(await page.locator('#command-dialog').isVisible(),false);
-    await page.locator('.timeline-expired [data-action="jump"]').click();
+    await page.locator('[data-instance="st1"] [data-output="0"]').getByRole('button',{name:'Recover / schedule',exact:true}).click();
     assert.equal(await page.locator('[name="jumptopos_date"]').inputValue(),'2026-11-11');
     assert.equal(await page.locator('[name="jumptopos_time"]').inputValue(),'12:00:00');
     await page.locator('#command-form button[type="submit"]').click();
@@ -1022,7 +1032,7 @@ test('production cockpit integrates design and existing API contracts',async t =
   await t.test('recovery with subsecond buffer bounds chooses a playable whole second',async () => {
     for (const output of data.instances[0].outputs) output.status.startpos='2026-11-11T12:00:00.123456Z';
     await page.waitForTimeout(2200);
-    await page.locator('.timeline-expired [data-action="jump"]').click();
+    await page.locator('[data-instance="st1"] [data-output="0"]').getByRole('button',{name:'Recover / schedule',exact:true}).click();
     assert.equal(await page.locator('[name="jumptopos_time"]').inputValue(),'12:00:01');
     await page.locator('#command-form button[type="submit"]').click();
     await page.locator('#command-dialog').waitFor({state:'hidden'});

@@ -27,7 +27,8 @@ configuration forms, fixed yyyy-mm-dd dates and hh:mm:ss placeholders across
 browser locales, 24-hour time validation, ticking UTC clocks beside both optional
 time fields (without changing entered values), existing start/stop times when
 reopening Jump / schedule, UTC payloads,
-expired-position recovery, Recorded time validation before schedule checks
+expired-position recovery at the output without duplicate buffer warnings,
+Recorded time validation before schedule checks
 (including changing buffer bounds and unavailable status), scheduled buffer
 expiry validation (including retention changes and blocked submissions), stop times
 after scheduled starts, future wall-clock times (including open forms as time

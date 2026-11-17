@@ -69,8 +69,9 @@ buffertvyerna. Båda använder serverns rapporterade inspelningsgränser och
 uppspelningspositioner och uppdateras varannan sekund. Markörer väljer rätt
 output och öppnar **Jump / schedule**. När markörer överlappar i ringvyn kan
 alla outputs fortfarande väljas i listan. En överskriven position markeras
-**Expired**; **Recover** öppnar hoppdialogen med en giltig tid vid buffertens
-början. Kommandot följer samma jump/schedule-regler som övrig uppspelning.
+**Expired** vid berörd output, där **Recover / schedule** öppnar hoppdialogen
+med en giltig tid vid buffertens början. Ingen separat varning visas under
+buffertvyn. Kommandot följer samma jump/schedule-regler som övrig uppspelning.
 Vid inaktuell status eller anslutningsfel spärras uppspelningskommandon.
 **Play** och **Pause** skyddas av **Arm** för respektive output. Välj Arm
 för att låsa upp knapparna i 20 sekunder eller för ett kommando. Den gula
